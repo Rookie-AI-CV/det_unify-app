@@ -1,0 +1,352 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: #f5f5f5;
+    color: #333;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.viewer-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+header {
+    background: white;
+    padding: 15px 20px;
+    border-bottom: 1px solid #ddd;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.back-btn {
+    color: #3498db;
+    text-decoration: none;
+    font-size: 16px;
+    font-weight: 500;
+    transition: color 0.3s;
+}
+
+.back-btn:hover {
+    color: #2980b9;
+}
+
+header h1 {
+    font-size: 20px;
+    color: #2c3e50;
+}
+
+.viewer-main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    background: white;
+}
+
+.image-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid #ddd;
+    overflow: hidden;
+    background: #1a1a1a;
+}
+
+.image-wrapper {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+    padding: 20px;
+    position: relative;
+}
+
+.zoomable {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    transition: transform 0.3s;
+    transform-origin: center center;
+    cursor: grab;
+}
+
+.zoomable:active {
+    cursor: grabbing;
+}
+
+.image-controls {
+    padding: 10px 20px;
+    background: #f8f9fa;
+    border-top: 1px solid #ddd;
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+.control-btn {
+    padding: 8px 16px;
+    border: 1px solid #ddd;
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.3s;
+}
+
+.control-btn:hover {
+    background: #e9ecef;
+    border-color: #3498db;
+}
+
+.info-panel {
+    width: 240px;
+    background: white;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    border-left: 1px solid #ddd;
+}
+
+.image-info {
+    padding: 10px 12px;
+    border-bottom: 1px solid #eee;
+}
+
+.image-info h3 {
+    font-size: 16px;
+    color: #2c3e50;
+    word-break: break-all;
+}
+
+.legend-section,
+.detections-section {
+    padding: 10px 12px;
+    border-bottom: 1px solid #eee;
+}
+
+.legend-section h4,
+.detections-section h4 {
+    font-size: 14px;
+    color: #7f8c8d;
+    margin-bottom: 15px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.legend {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+}
+
+.legend-color {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid #ddd;
+    flex-shrink: 0;
+}
+
+.legend-line-style {
+    width: 30px;
+    height: 2px;
+    background: #333;
+    flex-shrink: 0;
+    margin-right: 6px;
+}
+
+.legend-line-style.line-style-solid {
+    background: #333;
+}
+
+.legend-line-style.line-style-dashed {
+    background: repeating-linear-gradient(
+        to right,
+        #333 0,
+        #333 8px,
+        transparent 8px,
+        transparent 16px
+    );
+}
+
+.legend-line-style.line-style-dotted {
+    background: repeating-linear-gradient(
+        to right,
+        #333 0,
+        #333 3px,
+        transparent 3px,
+        transparent 8px
+    );
+}
+
+.legend-line-style.line-style-dashdot {
+    background: repeating-linear-gradient(
+        to right,
+        #333 0,
+        #333 8px,
+        transparent 8px,
+        transparent 10px,
+        #333 10px,
+        #333 13px,
+        transparent 13px,
+        transparent 16px
+    );
+}
+
+.label-legend {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #eee;
+}
+
+.label-legend h4 {
+    font-size: 11px;
+    color: #7f8c8d;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.label-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.label-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+}
+
+.detections-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.model-section {
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.model-header {
+    padding: 8px 10px;
+    background: #f8f9fa;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+}
+
+.count-badge {
+    margin-left: auto;
+    background: #e9ecef;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 9px;
+    color: #666;
+}
+
+.bbox-list {
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.bbox-item {
+    padding: 6px 8px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 10px;
+}
+
+.bbox-label {
+    font-weight: 500;
+    color: #2c3e50;
+    font-size: 10px;
+}
+
+.bbox-score {
+    color: #27ae60;
+    font-size: 9px;
+}
+
+.bbox-coords {
+    color: #7f8c8d;
+    font-size: 8px;
+    font-family: monospace;
+}
+
+.no-detections {
+    color: #95a5a6;
+    font-style: italic;
+    text-align: center;
+    padding: 20px;
+}
+
+.navigation {
+    background: white;
+    padding: 15px 20px;
+    border-top: 1px solid #ddd;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    box-shadow: 0 -2px 4px rgba(0,0,0,0.1);
+}
+
+.nav-btn {
+    padding: 10px 20px;
+    border: 1px solid #ddd;
+    background: white;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.3s;
+}
+
+.nav-btn:hover {
+    background: #3498db;
+    color: white;
+    border-color: #3498db;
+}
+
+.counter {
+    font-size: 12px;
+    color: #666;
+    min-width: 60px;
+    text-align: center;
+    font-weight: 500;
+}
+
+.navigation-hint {
+    font-size: 10px;
+    color: #999;
+    font-style: italic;
+}
+

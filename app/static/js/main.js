@@ -74,7 +74,15 @@ function handleModelUpload(files) {
                 }
                 
                 sessionId = data.session_id || sessionId;
-                uploadedModels = data.models || [];
+                // Accumulate models instead of replacing
+                const newModels = data.models || [];
+                // Merge new models with existing ones, avoiding duplicates
+                const existingPaths = new Set(uploadedModels.map(m => m.path));
+                newModels.forEach(model => {
+                    if (!existingPaths.has(model.path)) {
+                        uploadedModels.push(model);
+                    }
+                });
                 updateModelList();
                 checkPredictButton();
             } catch (e) {
@@ -167,7 +175,15 @@ function handleDataUpload(files) {
                     return;
                 }
                 
-                uploadedImages = data.image_paths || [];
+                // Accumulate images instead of replacing
+                const newImages = data.image_paths || [];
+                // Merge new images with existing ones, avoiding duplicates
+                const existingImages = new Set(uploadedImages);
+                newImages.forEach(img => {
+                    if (!existingImages.has(img)) {
+                        uploadedImages.push(img);
+                    }
+                });
                 updateDataList();
                 checkPredictButton();
             } catch (e) {
@@ -202,21 +218,6 @@ function handleDataUpload(files) {
     xhr.send(formData);
 }
 
-// Threshold sync
-const thresholdSlider = document.getElementById('threshold-slider');
-const thresholdInput = document.getElementById('threshold-input');
-
-thresholdSlider.addEventListener('input', (e) => {
-    thresholdInput.value = e.target.value;
-});
-
-thresholdInput.addEventListener('input', (e) => {
-    let value = parseFloat(e.target.value);
-    if (value < 0) value = 0;
-    if (value > 1) value = 1;
-    thresholdSlider.value = value;
-    thresholdInput.value = value;
-});
 
 // Predict button
 document.getElementById('predict-btn').addEventListener('click', runPrediction);
@@ -231,8 +232,12 @@ function runPrediction() {
     btn.disabled = true;
     btn.textContent = '预测中...';
     
-    const threshold = parseFloat(thresholdInput.value);
-    const maxSize = parseInt(document.getElementById('max-size-input').value);
+    // Prepare model configs with individual thresholds and max sizes
+    const modelConfigs = uploadedModels.map(model => ({
+        path: model.path,
+        threshold: model.threshold || 0.5,
+        max_size: model.maxSize || 1536
+    }));
     
     fetch('/api/predict', {
         method: 'POST',
@@ -241,10 +246,8 @@ function runPrediction() {
         },
         body: JSON.stringify({
             session_id: sessionId,
-            model_paths: uploadedModels.map(m => m.path),
-            image_paths: uploadedImages,
-            threshold: threshold,
-            max_size: maxSize
+            model_configs: modelConfigs,
+            image_paths: uploadedImages
         })
     })
     .then(response => response.json())
@@ -304,69 +307,36 @@ function displayResults(data) {
     resultsSection.scrollIntoView({ behavior: 'smooth' });
 }
 
-// Image viewer
-const modal = document.getElementById('image-viewer');
-const viewerImage = document.getElementById('viewer-image');
-const viewerFilename = document.getElementById('viewer-filename');
-const viewerLegend = document.getElementById('viewer-legend');
-const closeBtn = document.querySelector('.close');
-const prevBtn = document.getElementById('prev-btn');
-const nextBtn = document.getElementById('next-btn');
-
-closeBtn.onclick = () => modal.style.display = 'none';
-window.onclick = (e) => {
-    if (e.target == modal) modal.style.display = 'none';
-};
-
-prevBtn.onclick = () => navigateImage(-1);
-nextBtn.onclick = () => navigateImage(1);
-
-document.addEventListener('keydown', (e) => {
-    if (modal.style.display === 'block') {
-        if (e.key === 'ArrowLeft') navigateImage(-1);
-        if (e.key === 'ArrowRight') navigateImage(1);
-        if (e.key === 'Escape') modal.style.display = 'none';
-    }
-});
-
 function openImageViewer(imgName) {
-    if (!currentResults || !currentResults.predictions[imgName]) return;
+    if (!currentResults || !currentResults.result_id) return;
     
-    currentImageIndex = imageList.indexOf(imgName);
-    updateViewer();
-    modal.style.display = 'block';
-}
-
-function navigateImage(direction) {
-    currentImageIndex += direction;
-    if (currentImageIndex < 0) currentImageIndex = imageList.length - 1;
-    if (currentImageIndex >= imageList.length) currentImageIndex = 0;
-    updateViewer();
-}
-
-function updateViewer() {
-    const imgName = imageList[currentImageIndex];
-    const pred = currentResults.predictions[imgName];
-    
-    viewerImage.src = pred.image;
-    viewerFilename.textContent = imgName;
-    
-    // Update legend
-    viewerLegend.innerHTML = '';
-    pred.predictions.forEach(predGroup => {
-        const legendItem = document.createElement('div');
-        legendItem.className = 'legend-item';
-        legendItem.innerHTML = `
-            <div class="legend-color" style="background-color: rgb(${predGroup.color.join(',')})"></div>
-            <span>${predGroup.model_name}</span>
-        `;
-        viewerLegend.appendChild(legendItem);
-    });
+    // Navigate to viewer page
+    window.location.href = `/viewer/${currentResults.result_id}`;
 }
 
 // Helper functions
 function setupDragAndDrop(area, input, handler) {
-    area.addEventListener('click', () => input.click());
+    // Prevent multiple event bindings
+    if (area.dataset.dragSetup === 'true') {
+        return;
+    }
+    area.dataset.dragSetup = 'true';
+    
+    // Click on area to trigger file input (but not if clicking directly on input)
+    area.addEventListener('click', (e) => {
+        // Don't trigger if clicking directly on the input element
+        if (e.target === input || input.contains(e.target)) {
+            return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        input.click();
+    });
+    
+    // Prevent input from triggering area click
+    input.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
     
     area.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -379,12 +349,18 @@ function setupDragAndDrop(area, input, handler) {
     
     area.addEventListener('drop', (e) => {
         e.preventDefault();
+        e.stopPropagation();
         area.classList.remove('drag-over');
         handler(e.dataTransfer.files);
     });
     
     input.addEventListener('change', (e) => {
-        handler(e.target.files);
+        e.stopPropagation();
+        if (e.target.files && e.target.files.length > 0) {
+            handler(e.target.files);
+            // Reset input to allow selecting the same file again
+            e.target.value = '';
+        }
     });
 }
 
@@ -394,28 +370,79 @@ function updateModelList() {
     
     uploadedModels.forEach((model, idx) => {
         const item = document.createElement('div');
-        item.className = 'file-item';
+        item.className = 'model-item';
+        item.dataset.modelIdx = idx;
+        
+        // Initialize model config if not exists
+        if (!model.threshold) model.threshold = 0.5;
+        if (!model.maxSize) model.maxSize = 1536;
+        
         item.innerHTML = `
-            <span>${model.name}</span>
-            <span style="color: #999; font-size: 12px;">(${model.type}${model.sub_type ? ' - ' + model.sub_type : ''})</span>
+            <div class="model-item-header">
+                <span class="model-name">${model.name}</span>
+                <span class="model-type">(${model.type}${model.sub_type ? ' - ' + model.sub_type : ''})</span>
+                <button class="remove-model-btn" onclick="removeModel(${idx})" title="移除模型">×</button>
+            </div>
+            <div class="model-item-config">
+                <div class="config-row">
+                    <label>置信度阈值:</label>
+                    <input type="range" class="model-threshold-slider" min="0" max="1" step="0.01" 
+                           value="${model.threshold}" oninput="updateModelThreshold(${idx}, this.value)">
+                    <input type="number" class="model-threshold-input" min="0" max="1" step="0.01" 
+                           value="${model.threshold}" oninput="updateModelThreshold(${idx}, this.value)">
+                </div>
+                <div class="config-row">
+                    <label>最大尺寸:</label>
+                    <input type="number" class="model-maxsize-input" min="512" max="4096" step="64" 
+                           value="${model.maxSize}" oninput="updateModelMaxSize(${idx}, this.value)">
+                </div>
+            </div>
         `;
         list.appendChild(item);
     });
+}
+
+function updateModelThreshold(idx, value) {
+    if (uploadedModels[idx]) {
+        uploadedModels[idx].threshold = parseFloat(value);
+        // Sync slider and input
+        const item = document.querySelector(`[data-model-idx="${idx}"]`);
+        if (item) {
+            const slider = item.querySelector('.model-threshold-slider');
+            const input = item.querySelector('.model-threshold-input');
+            if (slider) slider.value = value;
+            if (input) input.value = value;
+        }
+    }
+}
+
+function updateModelMaxSize(idx, value) {
+    if (uploadedModels[idx]) {
+        uploadedModels[idx].maxSize = parseInt(value);
+    }
+}
+
+function removeModel(idx) {
+    if (confirm('确定要移除此模型吗？')) {
+        uploadedModels.splice(idx, 1);
+        updateModelList();
+        checkPredictButton();
+    }
 }
 
 function updateDataList() {
     const list = document.getElementById('data-list');
     list.innerHTML = '';
     
-    uploadedImages.forEach((imgPath, idx) => {
-        const imgName = imgPath.split(/[/\\]/).pop();
+    const count = uploadedImages.length;
+    if (count > 0) {
         const item = document.createElement('div');
         item.className = 'file-item';
         item.innerHTML = `
-            <span>${imgName}</span>
+            <span>已上传 ${count} 张图片</span>
         `;
         list.appendChild(item);
-    });
+    }
 }
 
 function checkPredictButton() {

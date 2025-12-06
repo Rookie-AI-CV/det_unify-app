@@ -11,10 +11,11 @@ import json
 import cv2
 import numpy as np
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, Response
 from werkzeug.utils import secure_filename
 import uuid
 from loguru import logger
+from collections import defaultdict
 
 # Import prediction utilities
 import sys
@@ -26,6 +27,21 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024  # 2GB max file size
 app.config['UPLOAD_FOLDER'] = Path(__file__).parent / 'static' / 'uploads'
 app.config['RESULTS_FOLDER'] = Path(__file__).parent / 'static' / 'results'
+
+# Global error handler to ensure JSON responses
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Not found'}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"Internal server error: {error}", exc_info=True)
+    return jsonify({'error': 'Internal server error'}), 500
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    logger.error(f"Unhandled exception: {e}", exc_info=True)
+    return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 # Create directories
 app.config['UPLOAD_FOLDER'].mkdir(parents=True, exist_ok=True)
@@ -56,10 +72,17 @@ def extract_zip(zip_path, extract_to):
 def find_model_files(directory):
     """Find all model files (.pt, .pth, .ckpt) in directory"""
     model_files = []
+    seen_paths = set()
     for ext in ['*.pt', '*.pth', '*.ckpt']:
-        model_files.extend(Path(directory).glob(ext))
-        model_files.extend(Path(directory).rglob(ext))
-    return [str(f) for f in model_files]
+        found = list(Path(directory).glob(ext))
+        found.extend(Path(directory).rglob(ext))
+        for f in found:
+            # Convert to absolute path and normalize to avoid duplicates
+            abs_path = str(f.resolve())
+            if abs_path not in seen_paths:
+                seen_paths.add(abs_path)
+                model_files.append(abs_path)
+    return model_files
 
 
 def find_image_files(directory):
@@ -71,87 +94,102 @@ def find_image_files(directory):
     return sorted([str(f) for f in image_files])
 
 
-def load_model_wrapper(checkpoint_path):
-    """Load model and return model object and type info"""
-    model_type, hq_sub_type = detect_model_type(checkpoint_path)
-    if model_type is None:
-        return None, None, None, "无法识别模型类型"
-    
+def load_coco_json(json_path):
+    """Load COCO format JSON file"""
     try:
-        if model_type == 'dino':
-            from ml_backend.model import ModelInfo, MODE
-            from ml_backend.predict.algos.det02 import DET02Predictor
-            model_info = ModelInfo(model_id="dino", model_type="dino", 
-                                  checkpoint_path=checkpoint_path, mode=MODE.PREDICT)
-            predictor = DET02Predictor(model_info)
-            predictor.load_model()
-            return predictor, 'dino', None, None
-        else:
-            from src.predict.predict_hq_det import load_hq_model
-            model = load_hq_model(checkpoint_path, hq_sub_type, device='cuda:0')
-            return model, 'hq_det', hq_sub_type, None
+        with open(json_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
     except Exception as e:
-        return None, None, None, str(e)
+        logger.error(f"Error loading COCO JSON: {e}")
+        return None
 
 
-def predict_with_model(model, model_type, hq_sub_type, image_path, threshold, max_size=1536):
-    """Predict with loaded model"""
-    try:
-        img = cv2.imread(image_path)
-        if img is None:
-            return None, "无法读取图片"
-        
-        if model_type == 'dino':
-            result = model.predict(image_path, threshold)
-            return result, None
-        else:
-            import inspect
-            sig = inspect.signature(model.predict)
-            params = list(sig.parameters.keys())
-            
-            predict_kwargs = {}
-            if 'bgr' in params:
-                predict_kwargs['bgr'] = True
-            if 'confidence' in params or 'conf' in params:
-                predict_kwargs['confidence' if 'confidence' in params else 'conf'] = threshold
-            if 'max_size' in params or 'imgsz' in params:
-                predict_kwargs['max_size' if 'max_size' in params else 'imgsz'] = max_size
-            
-            predict_results = model.predict([img], **predict_kwargs)
-            result = predict_results[0] if isinstance(predict_results, list) else predict_results
-            return result, None
-    except Exception as e:
-        return None, str(e)
-
-
-def convert_result_to_bboxes(result, model_type):
-    """Convert prediction result to bboxes format"""
-    bboxes = []
+def draw_rectangle_with_style(img, pt1, pt2, color, thickness, style='solid'):
+    """Draw rectangle with different line styles (solid, dashed, dotted, dashdot)"""
+    x1, y1 = pt1
+    x2, y2 = pt2
+    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
     
-    if model_type == 'dino':
-        if hasattr(result, 'predictions') and result.predictions:
-            for pred in result.predictions:
-                for point in pred.points:
-                    bboxes.append({
-                        'bbox': [point.x, point.y, point.x + point.w, point.y + point.h],
-                        'label': pred.name,
-                        'score': pred.confidence
-                    })
-    else:
-        if hasattr(result, 'bboxes') and result.bboxes:
-            labels = getattr(result, 'labels', None)
-            scores = getattr(result, 'scores', None)
-            for i, bbox in enumerate(result.bboxes):
-                if len(bbox) >= 4:
-                    label = str(labels[i]) if labels and i < len(labels) and labels[i] else "object"
-                    score = float(scores[i]) if scores and i < len(scores) else 1.0
-                    bboxes.append({
-                        'bbox': [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])],
-                        'label': label,
-                        'score': score
-                    })
-    
-    return bboxes
+    if style == 'solid':
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
+    elif style == 'dashed':
+        # Draw dashed line by drawing short segments
+        gap = 10
+        dash = 15
+        # Top
+        x = x1
+        while x < x2:
+            cv2.line(img, (x, y1), (min(x + dash, x2), y1), color, thickness)
+            x += dash + gap
+        # Bottom
+        x = x1
+        while x < x2:
+            cv2.line(img, (x, y2), (min(x + dash, x2), y2), color, thickness)
+            x += dash + gap
+        # Left
+        y = y1
+        while y < y2:
+            cv2.line(img, (x1, y), (x1, min(y + dash, y2)), color, thickness)
+            y += dash + gap
+        # Right
+        y = y1
+        while y < y2:
+            cv2.line(img, (x2, y), (x2, min(y + dash, y2)), color, thickness)
+            y += dash + gap
+    elif style == 'dotted':
+        # Draw dotted line
+        gap = 8
+        # Top and bottom
+        for x in range(x1, x2, gap * 2):
+            cv2.circle(img, (x, y1), thickness, color, -1)
+            cv2.circle(img, (x, y2), thickness, color, -1)
+        # Left and right
+        for y in range(y1, y2, gap * 2):
+            cv2.circle(img, (x1, y), thickness, color, -1)
+            cv2.circle(img, (x2, y), thickness, color, -1)
+    elif style == 'dashdot':
+        # Draw dash-dot pattern
+        gap = 8
+        dash = 12
+        # Top
+        x = x1
+        while x < x2:
+            cv2.line(img, (x, y1), (min(x + dash, x2), y1), color, thickness)
+            x += dash + gap
+            if x < x2:
+                cv2.circle(img, (x, y1), thickness, color, -1)
+                x += gap
+        # Bottom
+        x = x1
+        while x < x2:
+            cv2.line(img, (x, y2), (min(x + dash, x2), y2), color, thickness)
+            x += dash + gap
+            if x < x2:
+                cv2.circle(img, (x, y2), thickness, color, -1)
+                x += gap
+        # Left
+        y = y1
+        while y < y2:
+            cv2.line(img, (x1, y), (x1, min(y + dash, y2)), color, thickness)
+            y += dash + gap
+            if y < y2:
+                cv2.circle(img, (x1, y), thickness, color, -1)
+                y += gap
+        # Right
+        y = y1
+        while y < y2:
+            cv2.line(img, (x2, y), (x2, min(y + dash, y2)), color, thickness)
+            y += dash + gap
+            if y < y2:
+                cv2.circle(img, (x2, y), thickness, color, -1)
+                y += gap
+
+
+def get_model_short_name(model_name, max_length=20):
+    """Get shortened model name showing only last few characters"""
+    if len(model_name) <= max_length:
+        return model_name
+    return '...' + model_name[-max_length:]
 
 
 @app.route('/')
@@ -212,12 +250,19 @@ def upload_models():
             return jsonify({'error': 'No valid model files found'}), 400
         
         models_info = []
+        seen_paths = set()
         for model_file in model_files:
+            # Normalize path to avoid duplicates
+            normalized_path = str(Path(model_file).resolve())
+            if normalized_path in seen_paths:
+                continue
+            seen_paths.add(normalized_path)
+            
             try:
-                model_type, hq_sub_type = detect_model_type(model_file)
+                model_type, hq_sub_type = detect_model_type(normalized_path)
                 if model_type:
                     models_info.append({
-                        'path': model_file,
+                        'path': normalized_path,
                         'name': os.path.basename(model_file),
                         'type': model_type,
                         'sub_type': hq_sub_type
@@ -287,111 +332,305 @@ def upload_data():
         if not image_files:
             return jsonify({'error': 'No valid image files found'}), 400
         
-        return jsonify({
+        response = jsonify({
             'session_id': session_id,
             'images': [os.path.basename(img) for img in image_files],
             'image_paths': image_files
         })
+        response.headers['Content-Type'] = 'application/json'
+        return response
     except Exception as e:
-        logger.error(f"Error in upload_data: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error in upload_data: {e}", exc_info=True)
+        response = jsonify({'error': str(e)})
+        response.headers['Content-Type'] = 'application/json'
+        return response, 500
 
 
 @app.route('/api/predict', methods=['POST'])
 def predict():
-    """Run prediction"""
-    data = request.json
-    session_id = data.get('session_id')
-    model_paths = data.get('model_paths', [])
-    image_paths = data.get('image_paths', [])
-    threshold = float(data.get('threshold', 0.5))
-    max_size = int(data.get('max_size', 1536))
-    
-    if not session_id or not model_paths or not image_paths:
-        return jsonify({'error': 'Missing required parameters'}), 400
-    
-    result_id = str(uuid.uuid4())
-    result_dir = app.config['RESULTS_FOLDER'] / result_id
-    result_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Load all models
-    loaded_models = []
-    model_infos = []
-    for model_path in model_paths:
-        model, model_type, hq_sub_type, error = load_model_wrapper(model_path)
-        if model:
-            loaded_models.append(model)
-            model_infos.append({
-                'path': model_path,
-                'name': os.path.basename(model_path),
-                'type': model_type,
-                'sub_type': hq_sub_type
-            })
-        else:
-            logger.warning(f"Failed to load model {model_path}: {error}")
-    
-    if not loaded_models:
-        return jsonify({'error': 'No models loaded successfully'}), 400
-    
-    # Generate colors for each model
-    colors = []
-    np.random.seed(42)
-    for i in range(len(loaded_models)):
-        colors.append(tuple(map(int, np.random.randint(0, 255, 3))))
-    
-    # Predict all images
-    predictions = {}
-    
-    for img_idx, image_path in enumerate(image_paths):
-        img_name = os.path.basename(image_path)
-        img = cv2.imread(image_path)
-        if img is None:
-            continue
+    """Run prediction using predict.py script"""
+    try:
+        # Ensure request has JSON content type
+        if not request.is_json:
+            return jsonify({'error': 'Content-Type must be application/json'}), 400
         
-        img_predictions = []
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'error': 'No JSON data provided or invalid JSON'}), 400
         
-        for model_idx, (model, model_info) in enumerate(zip(loaded_models, model_infos)):
-            result, error = predict_with_model(
-                model, model_info['type'], model_info['sub_type'],
-                image_path, threshold, max_size
-            )
+        session_id = data.get('session_id')
+        model_configs = data.get('model_configs', [])  # List of {path, threshold, max_size}
+        image_paths = data.get('image_paths', [])
+        
+        # Support legacy format (backward compatibility)
+        if not model_configs and data.get('model_paths'):
+            model_paths = data.get('model_paths', [])
+            threshold = float(data.get('threshold', 0.5))
+            max_size = int(data.get('max_size', 1536))
+            model_configs = [{'path': p, 'threshold': threshold, 'max_size': max_size} for p in model_paths]
+        
+        if not session_id or not model_configs or not image_paths:
+            return jsonify({'error': 'Missing required parameters'}), 400
+        
+        result_id = str(uuid.uuid4())
+        result_dir = app.config['RESULTS_FOLDER'] / result_id
+        result_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create image list file for batch prediction
+        image_list_file = result_dir / 'image_list.txt'
+        with open(image_list_file, 'w', encoding='utf-8') as f:
+            for img_path in image_paths:
+                f.write(f"{img_path}\n")
+        
+        # Detect model types and collect model infos
+        model_infos = []
+        for model_config in model_configs:
+            model_path = model_config['path']
+            try:
+                model_type, hq_sub_type = detect_model_type(model_path)
+                if model_type:
+                    model_infos.append({
+                        'path': model_path,
+                        'name': os.path.basename(model_path),
+                        'type': model_type,
+                        'sub_type': hq_sub_type,
+                        'threshold': model_config.get('threshold', 0.5),
+                        'max_size': model_config.get('max_size', 1536)
+                    })
+            except Exception as e:
+                logger.error(f"Error detecting model type for {model_path}: {e}")
+                continue
+        
+        if not model_infos:
+            return jsonify({'error': 'No valid models detected'}), 400
+        
+        # Generate line styles for each model (different styles for different models)
+        line_styles = ['solid', 'dashed', 'dotted', 'dashdot']
+        model_styles = {}
+        for i in range(len(model_configs)):
+            model_styles[i] = line_styles[i % len(line_styles)]
+        
+        # Generate colors for each label (consistent across models)
+        label_colors = {}
+        np.random.seed(42)  # Fixed seed for consistent colors
+        
+        # Run prediction for each model and combine results
+        all_predictions = {}  # image_name -> list of model predictions
+        coco_results = {}  # model_name -> coco_data
+        
+        predict_script = ROOT_DIR / 'src' / 'predict' / 'predict.py'
+        
+        for model_idx, model_config in enumerate(model_configs):
+            model_path = model_config['path']
+            model_info = next((m for m in model_infos if m['path'] == model_path), None)
+            if not model_info:
+                continue
             
-            if result:
-                bboxes = convert_result_to_bboxes(result, model_info['type'])
-                img_predictions.append({
-                    'model_name': model_info['name'],
-                    'model_idx': model_idx,
-                    'color': colors[model_idx],
-                    'bboxes': bboxes
-                })
+            threshold = model_info['threshold']
+            max_size = model_info['max_size']
+            
+            # Create output directory for this model
+            model_output_dir = result_dir / f"model_{model_idx}"
+            model_output_dir.mkdir(exist_ok=True)
+            coco_json_path = model_output_dir / '_annotations.coco.json'
+            
+            # Build command
+            cmd = [
+                sys.executable,
+                str(predict_script),
+                '--checkpoint', model_path,
+                '--image-list', str(image_list_file),
+                '--threshold', str(threshold),
+                '--output', str(model_output_dir),
+            ]
+            
+            if model_info['type'] == 'hq_det' and model_info['sub_type']:
+                cmd.extend(['--model-type', 'hq_det', '--hq-model-type', model_info['sub_type']])
+                cmd.extend(['--max-size', str(max_size)])
+            elif model_info['type'] == 'dino':
+                cmd.extend(['--model-type', 'dino'])
+            
+            # Run prediction script
+            try:
+                import subprocess
+                result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT_DIR))
+                if result.returncode != 0:
+                    logger.error(f"Prediction failed for model {model_path}: {result.stderr}")
+                    continue
+                
+                # Load COCO JSON
+                coco_data = load_coco_json(coco_json_path)
+                if not coco_data:
+                    logger.warning(f"No COCO JSON found for model {model_path}")
+                    continue
+                
+                # Get short name for display
+                short_name = get_model_short_name(model_info['name'])
+                
+                coco_results[model_info['name']] = {
+                    'coco_data': coco_data,
+                    'short_name': short_name,
+                    'line_style': model_styles[model_idx],
+                    'model_info': model_info,
+                    'model_idx': model_idx
+                }
+                
+            except Exception as e:
+                logger.error(f"Error running prediction for model {model_path}: {e}")
+                continue
         
-        if img_predictions:
-            # Draw predictions
-            vis_img = img.copy()
-            for pred_group in img_predictions:
-                color = pred_group['color']
-                for bbox_info in pred_group['bboxes']:
-                    bbox = bbox_info['bbox']
-                    x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
-                    cv2.rectangle(vis_img, (x1, y1), (x2, y2), color, 2)
+        if not coco_results:
+            return jsonify({'error': 'No predictions generated'}), 400
+        
+        # Collect all labels first to assign consistent colors
+        all_labels = set()
+        first_coco = next(iter(coco_results.values()))['coco_data']
+        for model_result in coco_results.values():
+            coco_data = model_result['coco_data']
+            for ann in coco_data.get('annotations', []):
+                category_id = ann['category_id']
+                category = next((cat for cat in coco_data.get('categories', []) 
+                               if cat['id'] == category_id), None)
+                if category:
+                    all_labels.add(category['name'])
+        
+        # Generate colors for all labels at once (consistent across all images)
+        import colorsys
+        sorted_labels = sorted(all_labels)
+        for idx, label in enumerate(sorted_labels):
+            hue = idx * 137.508  # Golden angle for better color distribution
+            h = (hue % 360) / 360.0
+            s = 0.7
+            v = 0.9
+            r, g, b = colorsys.hsv_to_rgb(h, s, v)
+            label_colors[label] = tuple(map(int, (r * 255, g * 255, b * 255)))
+        
+        # Combine results from all models and generate visualizations
+        predictions = {}
+        
+        # Build image map from first COCO file
+        image_map = {img['id']: img for img in first_coco.get('images', [])}
+        
+        for img_info in first_coco.get('images', []):
+            img_name = img_info['file_name']
+            img_id = img_info['id']
+            
+            # Find original image path
+            original_img_path = None
+            for img_path in image_paths:
+                if os.path.basename(img_path) == img_name:
+                    original_img_path = img_path
+                    break
+            
+            if not original_img_path:
+                continue
+            
+            # Read original image
+            img = cv2.imread(original_img_path)
+            if img is None:
+                continue
+            
+            # Collect predictions from all models
+            img_predictions = []
+            
+            for model_name, model_result in coco_results.items():
+                coco_data = model_result['coco_data']
+                line_style = model_result['line_style']
+                short_name = model_result['short_name']
+                model_info = model_result['model_info']
+                model_idx = model_result['model_idx']
+                
+                # Find annotations for this image
+                annotations = [ann for ann in coco_data.get('annotations', []) 
+                             if ann['image_id'] == img_id]
+                
+                if annotations:
+                    bboxes = []
+                    for ann in annotations:
+                        # COCO format: [x, y, w, h] -> convert to [x1, y1, x2, y2]
+                        x, y, w, h = ann['bbox']
+                        category_id = ann['category_id']
+                        score = ann.get('score', 1.0)
+                        
+                        # Find category name
+                        category = next((cat for cat in coco_data.get('categories', []) 
+                                       if cat['id'] == category_id), None)
+                        label = category['name'] if category else 'object'
+                        
+                        # Get color for label (already assigned above)
+                        color = label_colors.get(label, (128, 128, 128))  # Default gray if not found
+                        
+                        bboxes.append({
+                            'bbox': [x, y, x + w, y + h],
+                            'label': label,
+                            'score': score,
+                            'color': color
+                        })
                     
-                    label = f"{pred_group['model_name']}: {bbox_info['label']} {bbox_info['score']:.2f}"
-                    cv2.putText(vis_img, label, (x1, y1 - 5), 
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                    if bboxes:
+                        img_predictions.append({
+                            'model_name': short_name,
+                            'full_name': model_name,
+                            'model_idx': model_idx,
+                            'line_style': line_style,
+                            'bboxes': bboxes
+                        })
             
-            output_path = result_dir / img_name
-            cv2.imwrite(str(output_path), vis_img)
-            
-            predictions[img_name] = {
-                'image': f'/static/results/{result_id}/{img_name}',
-                'predictions': img_predictions
-            }
-    
-    return jsonify({
-        'result_id': result_id,
-        'predictions': predictions,
-        'model_infos': model_infos
-    })
+            if img_predictions:
+                # Draw predictions (only bounding boxes, no text on image)
+                vis_img = img.copy()
+                for pred_group in img_predictions:
+                    line_style = pred_group['line_style']
+                    for bbox_info in pred_group['bboxes']:
+                        bbox = bbox_info['bbox']
+                        color = bbox_info['color']  # Color based on label
+                        x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+                        draw_rectangle_with_style(vis_img, (x1, y1), (x2, y2), color, 2, style=line_style)
+                
+                output_path = result_dir / img_name
+                cv2.imwrite(str(output_path), vis_img)
+                
+                predictions[img_name] = {
+                    'image': f'/static/results/{result_id}/{img_name}',
+                    'predictions': img_predictions
+                }
+        
+        if not predictions:
+            return jsonify({'error': 'No predictions generated'}), 400
+        
+        # Prepare model infos with display names and line styles
+        display_model_infos = []
+        style_map = {
+            'solid': '实线',
+            'dashed': '虚线',
+            'dotted': '点线',
+            'dashdot': '点划线'
+        }
+        for i, model_info in enumerate(model_infos):
+            display_model_infos.append({
+                **model_info,
+                'short_name': get_model_short_name(model_info['name']),
+                'line_style': model_styles.get(i, 'solid'),
+                'style_desc': style_map.get(model_styles.get(i, 'solid'), '实线')
+            })
+        
+        # Save results to JSON file for later retrieval
+        results_data = {
+            'result_id': result_id,
+            'predictions': predictions,
+            'model_infos': display_model_infos,
+            'label_colors': {k: list(v) for k, v in label_colors.items()}  # Convert tuple to list for JSON
+        }
+        results_file = result_dir / 'results.json'
+        with open(results_file, 'w', encoding='utf-8') as f:
+            json.dump(results_data, f, ensure_ascii=False, indent=2)
+        
+        response = jsonify(results_data)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+    except Exception as e:
+        logger.error(f"Error in predict endpoint: {e}", exc_info=True)
+        return jsonify({'error': f'Prediction failed: {str(e)}'}), 500
 
 
 @app.route('/static/<path:path>')
@@ -399,6 +638,51 @@ def send_static(path):
     return send_from_directory('static', path)
 
 
+@app.route('/viewer/<result_id>')
+def viewer(result_id):
+    """Image viewer page"""
+    return render_template('viewer.html', result_id=result_id)
+
+
+@app.route('/api/results/<result_id>')
+def get_results(result_id):
+    """Get prediction results by result_id"""
+    try:
+        result_dir = app.config['RESULTS_FOLDER'] / result_id
+        if not result_dir.exists():
+            return jsonify({'error': 'Result not found'}), 404
+        
+        # Try to find results JSON file
+        results_file = result_dir / 'results.json'
+        if results_file.exists():
+            with open(results_file, 'r', encoding='utf-8') as f:
+                return jsonify(json.load(f))
+        
+        # If no JSON file, scan directory for images
+        image_files = list(result_dir.glob('*.jpg')) + list(result_dir.glob('*.png'))
+        if not image_files:
+            return jsonify({'error': 'No results found'}), 404
+        
+        # Return basic info
+        predictions = {}
+        for img_file in image_files:
+            img_name = img_file.name
+            predictions[img_name] = {
+                'image': f'/static/results/{result_id}/{img_name}',
+                'predictions': []
+            }
+        
+        return jsonify({
+            'result_id': result_id,
+            'predictions': predictions
+        })
+    except Exception as e:
+        logger.error(f"Error getting results: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
+    # Disable Flask's default error handlers for API routes
+    app.config['PROPAGATE_EXCEPTIONS'] = True
     app.run(host='0.0.0.0', port=6006, debug=True)
 
