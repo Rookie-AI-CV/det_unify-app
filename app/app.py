@@ -346,6 +346,154 @@ def upload_data():
         return response, 500
 
 
+@app.route('/api/upload/models/path', methods=['POST'])
+def upload_models_by_path():
+    """Handle model file imports from local paths"""
+    try:
+        if not request.is_json:
+            return jsonify({'error': 'Request must be JSON'}), 400
+        
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'error': 'Invalid JSON data'}), 400
+        
+        paths_str = data.get('paths', '')
+        if not paths_str or not paths_str.strip():
+            return jsonify({'error': 'No paths provided'}), 400
+        
+        session_id = data.get('session_id')
+        if not session_id:
+            session_id = str(uuid.uuid4())
+        
+        # Split paths by semicolon
+        paths = [p.strip() for p in paths_str.split(';') if p.strip()]
+        if not paths:
+            return jsonify({'error': 'No valid paths provided'}), 400
+        
+        models_info = []
+        seen_paths = set()
+        
+        for path_str in paths:
+            try:
+                path_obj = Path(path_str).resolve()
+                
+                # Check if path exists
+                if not path_obj.exists():
+                    logger.warning(f"Path does not exist: {path_str}")
+                    continue
+                
+                # Handle directory: find all model files in it
+                if path_obj.is_dir():
+                    found_models = find_model_files(str(path_obj))
+                    for model_file in found_models:
+                        normalized_path = str(Path(model_file).resolve())
+                        if normalized_path in seen_paths:
+                            continue
+                        seen_paths.add(normalized_path)
+                        
+                        try:
+                            model_type, hq_sub_type = detect_model_type(normalized_path)
+                            if model_type:
+                                models_info.append({
+                                    'path': normalized_path,
+                                    'name': os.path.basename(model_file),
+                                    'type': model_type,
+                                    'sub_type': hq_sub_type
+                                })
+                        except Exception as e:
+                            logger.error(f"Error detecting model type for {model_file}: {e}")
+                            continue
+                
+                # Handle file: check if it's a model file
+                elif path_obj.is_file():
+                    if not allowed_file(path_obj.name):
+                        logger.warning(f"File is not a model file: {path_str}")
+                        continue
+                    
+                    normalized_path = str(path_obj.resolve())
+                    if normalized_path in seen_paths:
+                        continue
+                    seen_paths.add(normalized_path)
+                    
+                    try:
+                        model_type, hq_sub_type = detect_model_type(normalized_path)
+                        if model_type:
+                            models_info.append({
+                                'path': normalized_path,
+                                'name': path_obj.name,
+                                'type': model_type,
+                                'sub_type': hq_sub_type
+                            })
+                    except Exception as e:
+                        logger.error(f"Error detecting model type for {path_str}: {e}")
+                        continue
+                else:
+                    logger.warning(f"Path is neither file nor directory: {path_str}")
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"Error processing path {path_str}: {e}")
+                continue
+        
+        if not models_info:
+            return jsonify({'error': 'No valid model files found in provided paths'}), 400
+        
+        return jsonify({
+            'session_id': session_id,
+            'models': models_info
+        })
+    except Exception as e:
+        logger.error(f"Error in upload_models_by_path: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/upload/data/path', methods=['POST'])
+def upload_data_by_path():
+    """Handle data file imports from local directory path"""
+    try:
+        if not request.is_json:
+            return jsonify({'error': 'Request must be JSON'}), 400
+        
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'error': 'Invalid JSON data'}), 400
+        
+        dir_path = data.get('path', '').strip()
+        if not dir_path:
+            return jsonify({'error': 'No directory path provided'}), 400
+        
+        session_id = data.get('session_id')
+        if not session_id:
+            return jsonify({'error': 'No session_id provided'}), 400
+        
+        # Check if path exists and is a directory
+        path_obj = Path(dir_path).resolve()
+        if not path_obj.exists():
+            return jsonify({'error': f'Directory does not exist: {dir_path}'}), 400
+        
+        if not path_obj.is_dir():
+            return jsonify({'error': f'Path is not a directory: {dir_path}'}), 400
+        
+        # Find all image files in the directory
+        image_files = find_image_files(str(path_obj))
+        
+        if not image_files:
+            return jsonify({'error': 'No valid image files found in directory'}), 400
+        
+        response = jsonify({
+            'session_id': session_id,
+            'images': [os.path.basename(img) for img in image_files],
+            'image_paths': image_files
+        })
+        response.headers['Content-Type'] = 'application/json'
+        return response
+    except Exception as e:
+        logger.error(f"Error in upload_data_by_path: {e}", exc_info=True)
+        response = jsonify({'error': str(e)})
+        response.headers['Content-Type'] = 'application/json'
+        return response, 500
+
+
 @app.route('/api/predict', methods=['POST'])
 def predict():
     """Run prediction using predict.py script"""

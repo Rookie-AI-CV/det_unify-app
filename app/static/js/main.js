@@ -123,6 +123,138 @@ const dataInput = document.getElementById('data-input');
 
 setupDragAndDrop(dataUploadArea, dataInput, handleDataUpload);
 
+// Model path import
+document.getElementById('model-path-btn').addEventListener('click', handleModelPathImport);
+
+function handleModelPathImport() {
+    const pathInput = document.getElementById('model-path-input');
+    const pathsStr = pathInput.value.trim();
+    
+    if (!pathsStr) {
+        alert('请输入模型路径');
+        return;
+    }
+    
+    if (!sessionId) {
+        sessionId = generateSessionId();
+    }
+    
+    const btn = document.getElementById('model-path-btn');
+    btn.disabled = true;
+    btn.textContent = '导入中...';
+    
+    fetch('/api/upload/models/path', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            session_id: sessionId,
+            paths: pathsStr
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.textContent = '导入路径';
+        pathInput.value = ''; // Clear input after successful import
+        
+        if (data.error) {
+            alert('导入失败: ' + data.error);
+            return;
+        }
+        
+        sessionId = data.session_id || sessionId;
+        // Accumulate models instead of replacing
+        const newModels = data.models || [];
+        // Merge new models with existing ones, avoiding duplicates
+        const existingPaths = new Set(uploadedModels.map(m => m.path));
+        newModels.forEach(model => {
+            if (!existingPaths.has(model.path)) {
+                uploadedModels.push(model);
+            }
+        });
+        updateModelList();
+        checkPredictButton();
+        
+        if (newModels.length > 0) {
+            alert(`成功导入 ${newModels.length} 个模型`);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        btn.disabled = false;
+        btn.textContent = '导入路径';
+        alert('导入失败: ' + error.message);
+    });
+}
+
+// Data path import
+document.getElementById('data-path-btn').addEventListener('click', handleDataPathImport);
+
+function handleDataPathImport() {
+    const pathInput = document.getElementById('data-path-input');
+    const dirPath = pathInput.value.trim();
+    
+    if (!dirPath) {
+        alert('请输入目录路径');
+        return;
+    }
+    
+    if (!sessionId) {
+        alert('请先上传模型文件');
+        return;
+    }
+    
+    const btn = document.getElementById('data-path-btn');
+    btn.disabled = true;
+    btn.textContent = '导入中...';
+    
+    fetch('/api/upload/data/path', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            session_id: sessionId,
+            path: dirPath
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.textContent = '导入目录';
+        pathInput.value = ''; // Clear input after successful import
+        
+        if (data.error) {
+            alert('导入失败: ' + data.error);
+            return;
+        }
+        
+        // Accumulate images instead of replacing
+        const newImages = data.image_paths || [];
+        // Merge new images with existing ones, avoiding duplicates
+        const existingImages = new Set(uploadedImages);
+        newImages.forEach(img => {
+            if (!existingImages.has(img)) {
+                uploadedImages.push(img);
+            }
+        });
+        updateDataList();
+        checkPredictButton();
+        
+        if (newImages.length > 0) {
+            alert(`成功导入 ${newImages.length} 张图片`);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        btn.disabled = false;
+        btn.textContent = '导入目录';
+        alert('导入失败: ' + error.message);
+    });
+}
+
 function handleDataUpload(files) {
     if (!files || files.length === 0) {
         alert('请选择要上传的文件');
@@ -254,6 +386,8 @@ function runPrediction() {
     .then(data => {
         if (data.error) {
             alert('预测失败: ' + data.error);
+            btn.disabled = false;
+            btn.textContent = '开始预测';
             return;
         }
         
@@ -263,6 +397,12 @@ function runPrediction() {
         
         btn.disabled = false;
         btn.textContent = '开始预测';
+        
+        // Open first image in a new window/tab
+        if (imageList.length > 0 && data.result_id) {
+            const viewerUrl = `/viewer/${data.result_id}`;
+            window.open(viewerUrl, '_blank');
+        }
     })
     .catch(error => {
         console.error('Error:', error);

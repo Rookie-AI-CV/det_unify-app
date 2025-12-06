@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>模型预测统一入口</title>
+    <title>det web tool</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>模型预测统一入口</h1>
+            <h1>det web tool</h1>
             <div class="tabs">
                 <button class="tab-btn active" data-tab="predict">模型预测</button>
                 <button class="tab-btn" data-tab="evaluate">模型评估</button>
@@ -23,6 +23,14 @@
                     <p>拖拽模型文件到此处或点击上传</p>
                     <p class="hint">支持 .pt, .pth, .ckpt 文件或包含模型文件的 .zip 压缩包（可上传多个）</p>
                     <input type="file" id="model-input" multiple accept=".pt,.pth,.ckpt,.zip">
+                </div>
+                <div style="margin: 15px 0; padding: 15px; background: #f5f5f5; border-radius: 8px;">
+                    <p style="margin: 0 0 10px 0; font-weight: 600; color: #666;">或通过本地路径导入：</p>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="text" id="model-path-input" placeholder="输入模型路径，多个路径用分号(;)分割" 
+                               style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <button id="model-path-btn" class="btn-secondary" style="padding: 8px 16px;">导入路径</button>
+                    </div>
                 </div>
                 <div id="model-progress" class="progress-container" style="display: none;">
                     <div class="progress-bar">
@@ -39,6 +47,14 @@
                     <p>拖拽图片文件或压缩包到此处或点击上传</p>
                     <p class="hint">支持 .jpg, .jpeg, .png, .bmp 文件或包含图片的 .zip 压缩包</p>
                     <input type="file" id="data-input" multiple accept=".jpg,.jpeg,.png,.bmp,.zip">
+                </div>
+                <div style="margin: 15px 0; padding: 15px; background: #f5f5f5; border-radius: 8px;">
+                    <p style="margin: 0 0 10px 0; font-weight: 600; color: #666;">或通过本地目录导入：</p>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="text" id="data-path-input" placeholder="输入图片目录路径" 
+                               style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <button id="data-path-btn" class="btn-secondary" style="padding: 8px 16px;">导入目录</button>
+                    </div>
                 </div>
                 <div id="data-progress" class="progress-container" style="display: none;">
                     <div class="progress-bar">
