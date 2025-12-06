@@ -303,6 +303,9 @@ function displayResults(data) {
         resultsGrid.appendChild(item);
     });
     
+    // Bind clear results button
+    bindClearResultsButton();
+    
     // Scroll to results
     resultsSection.scrollIntoView({ behavior: 'smooth' });
 }
@@ -312,6 +315,29 @@ function openImageViewer(imgName) {
     
     // Navigate to viewer page
     window.location.href = `/viewer/${currentResults.result_id}`;
+}
+
+function clearResults() {
+    if (!currentResults) return;
+    
+    if (confirm('确定要清空所有预测结果吗？此操作不可恢复。')) {
+        const resultsSection = document.getElementById('results-section');
+        const resultsGrid = document.getElementById('results-grid');
+        
+        resultsGrid.innerHTML = '';
+        resultsSection.style.display = 'none';
+        currentResults = null;
+        imageList = [];
+    }
+}
+
+// Bind clear results button (button may be dynamically created)
+function bindClearResultsButton() {
+    const clearBtn = document.getElementById('clear-results-btn');
+    if (clearBtn && !clearBtn.dataset.bound) {
+        clearBtn.addEventListener('click', clearResults);
+        clearBtn.dataset.bound = 'true';
+    }
 }
 
 // Helper functions

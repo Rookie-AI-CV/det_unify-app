@@ -11,6 +11,8 @@
         <header>
             <a href="/" class="back-btn">← 返回</a>
             <h1>预测结果查看器</h1>
+            <div id="image-name-header" class="image-name-header"></div>
+            <button id="export-btn" class="export-btn">导出结果</button>
         </header>
         
         <div class="viewer-main">
@@ -21,25 +23,49 @@
             </div>
             
             <div class="info-panel">
-                <div class="image-info">
-                    <h3 id="image-name"></h3>
-                </div>
-                
-                <div class="legend-section">
-                    <h4>模型说明</h4>
-                    <div id="legend" class="legend"></div>
+                <div class="image-notes-section">
+                    <h4>图片备注</h4>
+                    <div class="status-badges" id="status-badges">
+                        <span class="status-badge" id="status-false-positive" style="display: none;">误检</span>
+                        <span class="status-badge" id="status-missed" style="display: none;">漏检</span>
+                    </div>
+                    <textarea id="image-notes" class="notes-textarea" placeholder="输入图片备注..."></textarea>
+                    <div class="shortcuts-hint">
+                        快捷键: F=误检, M=漏检
+                    </div>
                 </div>
                 
                 <div class="detections-section">
                     <h4>检测结果</h4>
                     <div id="detections" class="detections-list"></div>
                 </div>
+                
+                <div class="details-toggle">
+                    <button id="toggle-details" class="toggle-btn">显示详细信息 ▼</button>
+                </div>
+                
+                <div id="details-panel" class="details-panel" style="display: none;">
+                    <div class="defect-types-section">
+                        <h4>缺陷类型</h4>
+                        <div id="defect-types" class="defect-types-list"></div>
+                    </div>
+                    
+                    <div class="legend-section">
+                        <h4>模型说明</h4>
+                        <div id="legend" class="legend"></div>
+                    </div>
+                    
+                    <div class="label-colors-section">
+                        <h4>标签颜色</h4>
+                        <div id="label-colors" class="label-list"></div>
+                    </div>
+                </div>
             </div>
         </div>
         
         <div class="navigation">
             <span id="image-counter" class="counter"></span>
-            <div class="navigation-hint">使用 ← → 或 A D 键切换图片</div>
+            <div class="navigation-hint">使用 ← → 或 A D 键切换图片 | F=误检 M=漏检</div>
         </div>
     </div>
     
@@ -49,6 +75,9 @@
         let imageList = [];
         let currentIndex = 0;
         let zoomLevel = 1;
+        let isDragging = false;
+        let dragStart = { x: 0, y: 0 };
+        let imageOffset = { x: 0, y: 0 };
         
         // Load results
         fetch(`/api/results/${resultId}`)
@@ -81,15 +110,58 @@
             mainImage.src = pred.image;
             mainImage.onload = () => {
                 zoomLevel = 1;
-                updateZoom();
+                resetImagePosition();
             };
-            document.getElementById('image-name').textContent = imgName;
+            // Update image name in header
+            document.getElementById('image-name-header').textContent = imgName;
             
             // Update counter
             document.getElementById('image-counter').textContent = 
                 `${currentIndex + 1} / ${imageList.length}`;
             
-            // Update legend
+            // Update notes and status
+            const notesTextarea = document.getElementById('image-notes');
+            const statusBadges = {
+                falsePositive: document.getElementById('status-false-positive'),
+                missed: document.getElementById('status-missed')
+            };
+            
+            // Load saved notes and status
+            const imageNotes = pred.notes || '';
+            const imageStatus = pred.status || null;
+            notesTextarea.value = imageNotes;
+            
+            // Update status badges
+            statusBadges.falsePositive.style.display = imageStatus === 'false_positive' ? 'inline-block' : 'none';
+            statusBadges.missed.style.display = imageStatus === 'missed' ? 'inline-block' : 'none';
+            
+            // Update defect types (simplified - only labels)
+            const defectTypesDiv = document.getElementById('defect-types');
+            defectTypesDiv.innerHTML = '';
+            
+            if (pred.predictions && pred.predictions.length > 0) {
+                const allLabels = new Set();
+                pred.predictions.forEach(predGroup => {
+                    predGroup.bboxes.forEach(bbox => {
+                        allLabels.add(bbox.label);
+                    });
+                });
+                
+                Array.from(allLabels).sort().forEach(label => {
+                    const labelItem = document.createElement('div');
+                    labelItem.className = 'defect-type-item';
+                    const labelColor = currentData.label_colors && currentData.label_colors[label] 
+                        ? currentData.label_colors[label] 
+                        : [128, 128, 128];
+                    labelItem.innerHTML = `
+                        <div class="legend-color" style="background-color: rgb(${labelColor.join(',')})"></div>
+                        <span>${label}</span>
+                    `;
+                    defectTypesDiv.appendChild(labelItem);
+                });
+            }
+            
+            // Update legend (only in details panel)
             const legend = document.getElementById('legend');
             legend.innerHTML = '';
             if (currentData.model_infos) {
@@ -106,19 +178,10 @@
                 });
             }
             
-            // Update label colors legend (only once, remove old one first)
-            const legendSection = document.querySelector('.legend-section');
-            const existingLabelLegend = legendSection.querySelector('.label-legend');
-            if (existingLabelLegend) {
-                existingLabelLegend.remove();
-            }
-            
+            // Update label colors (only in details panel)
+            const labelColorsDiv = document.getElementById('label-colors');
+            labelColorsDiv.innerHTML = '';
             if (currentData.label_colors) {
-                const labelLegend = document.createElement('div');
-                labelLegend.className = 'label-legend';
-                labelLegend.innerHTML = '<h4>标签颜色</h4>';
-                const labelList = document.createElement('div');
-                labelList.className = 'label-list';
                 Object.entries(currentData.label_colors).forEach(([label, color]) => {
                     const labelItem = document.createElement('div');
                     labelItem.className = 'label-item';
@@ -126,59 +189,50 @@
                         <div class="legend-color" style="background-color: rgb(${color.join(',')})"></div>
                         <span>${label}</span>
                     `;
-                    labelList.appendChild(labelItem);
+                    labelColorsDiv.appendChild(labelItem);
                 });
-                labelLegend.appendChild(labelList);
-                if (legendSection) {
-                    legendSection.appendChild(labelLegend);
-                }
             }
             
-            // Update detections
+            // Update detections (simplified, one line per detection)
             const detectionsDiv = document.getElementById('detections');
             detectionsDiv.innerHTML = '';
             
             if (pred.predictions && pred.predictions.length > 0) {
+                // Collect all bboxes from all models
+                const allBboxes = [];
                 pred.predictions.forEach(predGroup => {
-                    const modelSection = document.createElement('div');
-                    modelSection.className = 'model-section';
-                    
-                    const modelHeader = document.createElement('div');
-                    modelHeader.className = 'model-header';
-                    const styleClass = `line-style-${predGroup.line_style || 'solid'}`;
-                    const styleDesc = {
-                        'solid': '实线',
-                        'dashed': '虚线',
-                        'dotted': '点线',
-                        'dashdot': '点划线'
-                    }[predGroup.line_style || 'solid'] || '实线';
-                    modelHeader.innerHTML = `
-                        <div class="legend-line-style ${styleClass}"></div>
-                        <strong>${predGroup.model_name}</strong>
-                        <span style="font-size: 11px; color: #999; margin-left: 5px;">(${styleDesc})</span>
-                        <span class="count-badge">${predGroup.bboxes.length} 个检测框</span>
-                    `;
-                    modelSection.appendChild(modelHeader);
-                    
-                    if (predGroup.bboxes.length > 0) {
-                        const bboxList = document.createElement('div');
-                        bboxList.className = 'bbox-list';
-                        predGroup.bboxes.forEach((bboxInfo, idx) => {
-                            const bboxItem = document.createElement('div');
-                            bboxItem.className = 'bbox-item';
-                            const labelColor = bboxInfo.color || [0, 0, 0];
-                            bboxItem.innerHTML = `
-                                <div class="legend-color" style="background-color: rgb(${labelColor.join(',')})"></div>
-                                <span class="bbox-label">${bboxInfo.label}</span>
-                                <span class="bbox-score">置信度: ${(bboxInfo.score * 100).toFixed(2)}%</span>
-                                <span class="bbox-coords">位置: [${Math.round(bboxInfo.bbox[0])}, ${Math.round(bboxInfo.bbox[1])}, ${Math.round(bboxInfo.bbox[2])}, ${Math.round(bboxInfo.bbox[3])}]</span>
-                            `;
-                            bboxList.appendChild(bboxItem);
+                    predGroup.bboxes.forEach(bboxInfo => {
+                        allBboxes.push({
+                            ...bboxInfo,
+                            line_style: predGroup.line_style || 'solid'
                         });
-                        modelSection.appendChild(bboxList);
+                    });
+                });
+                
+                // Sort by score (descending) or label
+                allBboxes.sort((a, b) => {
+                    if (a.label !== b.label) {
+                        return a.label.localeCompare(b.label);
                     }
+                    return b.score - a.score;
+                });
+                
+                // Display each bbox in one compact line
+                allBboxes.forEach(bboxInfo => {
+                    const bboxItem = document.createElement('div');
+                    bboxItem.className = 'bbox-item-compact';
+                    const labelColor = bboxInfo.color || [128, 128, 128];
+                    const styleClass = `line-style-${bboxInfo.line_style || 'solid'}`;
                     
-                    detectionsDiv.appendChild(modelSection);
+                    // Format: [框] <标签名> (置信度分数)
+                    bboxItem.innerHTML = `
+                        <div class="bbox-indicator">
+                            <div class="legend-line-style-compact ${styleClass}" style="border-color: rgb(${labelColor.join(',')}); color: rgb(${labelColor.join(',')});"></div>
+                        </div>
+                        <span class="bbox-label-compact">${bboxInfo.label}</span>
+                        <span class="bbox-score-compact">(${(bboxInfo.score * 100).toFixed(1)}%)</span>
+                    `;
+                    detectionsDiv.appendChild(bboxItem);
                 });
             } else {
                 detectionsDiv.innerHTML = '<p class="no-detections">未检测到任何目标</p>';
@@ -190,19 +244,157 @@
             if (currentIndex < 0) currentIndex = imageList.length - 1;
             if (currentIndex >= imageList.length) currentIndex = 0;
             zoomLevel = 1;
-            updateZoom();
+            resetImagePosition();
             updateViewer();
         }
         
         function updateZoom() {
             const img = document.getElementById('main-image');
-            img.style.transform = `scale(${zoomLevel})`;
+            img.style.transform = `translate(${imageOffset.x}px, ${imageOffset.y}px) scale(${zoomLevel})`;
         }
+        
+        // Image dragging functionality
+        const mainImage = document.getElementById('main-image');
+        const imageWrapper = document.getElementById('image-wrapper');
+        
+        mainImage.addEventListener('mousedown', (e) => {
+            if (e.button === 0) { // Left mouse button
+                isDragging = true;
+                dragStart.x = e.clientX - imageOffset.x;
+                dragStart.y = e.clientY - imageOffset.y;
+                mainImage.style.cursor = 'grabbing';
+                mainImage.style.transition = 'none'; // Disable transition during dragging
+                e.preventDefault();
+            }
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                imageOffset.x = e.clientX - dragStart.x;
+                imageOffset.y = e.clientY - dragStart.y;
+                updateZoom();
+                e.preventDefault();
+            }
+        });
+        
+        document.addEventListener('mouseup', (e) => {
+            if (e.button === 0) { // Left mouse button
+                if (isDragging) {
+                    isDragging = false;
+                    mainImage.style.cursor = 'grab';
+                    mainImage.style.transition = 'transform 0.1s'; // Re-enable transition
+                }
+            }
+        });
+        
+        // Prevent context menu on right click during drag
+        mainImage.addEventListener('contextmenu', (e) => {
+            if (isDragging) {
+                e.preventDefault();
+            }
+        });
+        
+        // Reset image offset when image changes or zoom resets
+        function resetImagePosition() {
+            imageOffset.x = 0;
+            imageOffset.y = 0;
+            updateZoom();
+        }
+        
+        // Save notes and status
+        function saveImageNotes() {
+            if (!currentData || imageList.length === 0) return;
+            
+            const imgName = imageList[currentIndex];
+            const notesTextarea = document.getElementById('image-notes');
+            const notes = notesTextarea.value.trim();
+            
+            fetch(`/api/results/${resultId}/notes`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    image: imgName,
+                    notes: notes,
+                    status: currentData.predictions[imgName].status || null
+                })
+            }).catch(error => {
+                console.error('Error saving notes:', error);
+            });
+        }
+        
+        // Set image status
+        function setImageStatus(status) {
+            if (!currentData || imageList.length === 0) return;
+            
+            const imgName = imageList[currentIndex];
+            const notesTextarea = document.getElementById('image-notes');
+            const statusBadges = {
+                falsePositive: document.getElementById('status-false-positive'),
+                missed: document.getElementById('status-missed')
+            };
+            
+            // Toggle status if same status is pressed again
+            const currentStatus = currentData.predictions[imgName].status;
+            const newStatus = (currentStatus === status) ? null : status;
+            
+            currentData.predictions[imgName].status = newStatus;
+            
+            // Update badges
+            statusBadges.falsePositive.style.display = newStatus === 'false_positive' ? 'inline-block' : 'none';
+            statusBadges.missed.style.display = newStatus === 'missed' ? 'inline-block' : 'none';
+            
+            // Save to server
+            fetch(`/api/results/${resultId}/notes`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    image: imgName,
+                    notes: notesTextarea.value.trim(),
+                    status: newStatus
+                })
+            }).catch(error => {
+                console.error('Error saving status:', error);
+            });
+        }
+        
+        // Auto-save notes when typing stops
+        let notesSaveTimeout;
+        document.getElementById('image-notes').addEventListener('input', () => {
+            clearTimeout(notesSaveTimeout);
+            notesSaveTimeout = setTimeout(saveImageNotes, 1000); // Save after 1 second of inactivity
+        });
         
         // Keyboard navigation
         document.addEventListener('keydown', (e) => {
             // Ignore if typing in input fields
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                // But allow status shortcuts even in textarea
+                if (e.key === 'f' || e.key === 'F' || e.key === 'm' || e.key === 'M') {
+                    if (e.target.tagName === 'TEXTAREA') {
+                        e.preventDefault();
+                        if (e.key === 'f' || e.key === 'F') {
+                            setImageStatus('false_positive');
+                        } else if (e.key === 'm' || e.key === 'M') {
+                            setImageStatus('missed');
+                        }
+                    }
+                }
+                return;
+            }
+            
+            // Status shortcuts: F = false positive (误检), M = missed (漏检)
+            if (e.key === 'f' || e.key === 'F') {
+                e.preventDefault();
+                setImageStatus('false_positive');
+                return;
+            }
+            if (e.key === 'm' || e.key === 'M') {
+                e.preventDefault();
+                setImageStatus('missed');
                 return;
             }
             
@@ -227,7 +419,7 @@
             }
             if (e.key === '0') {
                 zoomLevel = 1;
-                updateZoom();
+                resetImagePosition();
             }
         });
         
@@ -240,6 +432,60 @@
                 updateZoom();
             }
         });
+        
+        // Toggle details panel
+        const toggleBtn = document.getElementById('toggle-details');
+        const detailsPanel = document.getElementById('details-panel');
+        let detailsExpanded = false;
+        
+        if (toggleBtn && detailsPanel) {
+            toggleBtn.addEventListener('click', () => {
+                detailsExpanded = !detailsExpanded;
+                if (detailsExpanded) {
+                    detailsPanel.style.display = 'block';
+                    toggleBtn.textContent = '隐藏详细信息 ▲';
+                } else {
+                    detailsPanel.style.display = 'none';
+                    toggleBtn.textContent = '显示详细信息 ▼';
+                }
+            });
+        }
+        
+        // Export button handler
+        const exportBtn = document.getElementById('export-btn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => {
+                exportBtn.disabled = true;
+                exportBtn.textContent = '导出中...';
+                
+                fetch(`/api/export/${resultId}`)
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.json().then(data => {
+                                throw new Error(data.error || '导出失败');
+                            });
+                        }
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `predictions_${resultId}.zip`;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                        exportBtn.disabled = false;
+                        exportBtn.textContent = '导出结果';
+                    })
+                    .catch(error => {
+                        alert('导出失败: ' + error.message);
+                        exportBtn.disabled = false;
+                        exportBtn.textContent = '导出结果';
+                    });
+            });
+        }
     </script>
 </body>
 </html>
