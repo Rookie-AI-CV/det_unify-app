@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模型预测统一入口</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>模型预测统一入口</h1>
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="predict">模型预测</button>
+                <button class="tab-btn" data-tab="evaluate">模型评估</button>
+            </div>
+        </header>
+
+        <main id="predict-tab" class="tab-content active">
+            <div class="section">
+                <h2>1. 上传模型文件</h2>
+                <div class="upload-area" id="model-upload-area">
+                    <p>拖拽模型文件到此处或点击上传</p>
+                    <p class="hint">支持 .pt, .pth, .ckpt 文件或包含模型文件的 .zip 压缩包（可上传多个）</p>
+                    <input type="file" id="model-input" multiple accept=".pt,.pth,.ckpt,.zip">
+                </div>
+                <div id="model-progress" class="progress-container" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="model-progress-fill"></div>
+                    </div>
+                    <span class="progress-text" id="model-progress-text">0%</span>
+                </div>
+                <div id="model-list" class="file-list"></div>
+            </div>
+
+            <div class="section">
+                <h2>2. 上传数据文件</h2>
+                <div class="upload-area" id="data-upload-area">
+                    <p>拖拽图片文件或压缩包到此处或点击上传</p>
+                    <p class="hint">支持 .jpg, .jpeg, .png, .bmp 文件或包含图片的 .zip 压缩包</p>
+                    <input type="file" id="data-input" multiple accept=".jpg,.jpeg,.png,.bmp,.zip">
+                </div>
+                <div id="data-progress" class="progress-container" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="data-progress-fill"></div>
+                    </div>
+                    <span class="progress-text" id="data-progress-text">0%</span>
+                </div>
+                <div id="data-list" class="file-list"></div>
+            </div>
+
+            <div class="section">
+                <h2>3. 设置参数</h2>
+                <div class="params">
+                    <div class="param-group">
+                        <label for="threshold">置信度阈值:</label>
+                        <input type="range" id="threshold-slider" min="0" max="1" step="0.01" value="0.5">
+                        <input type="number" id="threshold-input" min="0" max="1" step="0.01" value="0.5">
+                    </div>
+                    <div class="param-group">
+                        <label for="max-size">最大尺寸:</label>
+                        <input type="number" id="max-size-input" min="512" max="2048" step="64" value="1536">
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <button id="predict-btn" class="btn-primary" disabled>开始预测</button>
+            </div>
+
+            <div class="section" id="results-section" style="display: none;">
+                <h2>4. 预测结果</h2>
+                <div id="results-grid" class="results-grid"></div>
+            </div>
+        </main>
+
+        <main id="evaluate-tab" class="tab-content">
+            <p>模型评估功能开发中...</p>
+        </main>
+    </div>
+
+    <!-- Image Viewer Modal -->
+    <div id="image-viewer" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <div class="viewer-container">
+                <button class="nav-btn prev" id="prev-btn">❮</button>
+                <img id="viewer-image" src="" alt="">
+                <button class="nav-btn next" id="next-btn">❯</button>
+            </div>
+            <div class="viewer-info">
+                <p id="viewer-filename"></p>
+                <div id="viewer-legend"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
+
