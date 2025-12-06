@@ -9,8 +9,16 @@ import argparse
 import os
 import sys
 import subprocess
+import warnings
 from pathlib import Path
 from loguru import logger
+
+# 抑制 torch.load 的 FutureWarning
+warnings.filterwarnings('ignore', category=FutureWarning, message='.*torch.load.*weights_only.*')
+
+# 配置日志级别
+logger.remove()  # 移除默认处理器
+logger.add(sys.stderr, level="INFO", format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>")
 
 
 def try_load_dino(checkpoint_path):

@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import re
+import warnings
 from pathlib import Path
 import cv2
 import numpy as np
@@ -18,6 +19,40 @@ from PIL import Image, ImageDraw, ImageFont
 from ml_backend.predict.algos.det02 import DET02Predictor
 from ml_backend.model import ModelInfo, MODE
 from loguru import logger
+
+# 抑制各种警告
+warnings.filterwarnings('ignore', category=FutureWarning, message='.*torch.load.*weights_only.*')
+warnings.filterwarnings('ignore', category=FutureWarning, message='.*timm.*')
+warnings.filterwarnings('ignore', category=UserWarning, message='.*torchvision.*')
+warnings.filterwarnings('ignore', category=UserWarning, message='.*pretrained.*')
+warnings.filterwarnings('ignore', category=UserWarning, message='.*weights.*')
+
+# 配置日志级别，减少不必要的输出
+def filter_unwanted_logs(record):
+    """过滤掉不需要的日志"""
+    message = record["message"]
+    # 过滤 load_image 相关
+    if "[load_image]" in message or "Exec Time" in message:
+        return False
+    # 过滤 ml_backend 相关的初始化日志
+    if any(keyword in message for keyword in [
+        "minio client",
+        "init cache size",
+        "snapshot dir",
+        "start load model",
+        "app dir"
+    ]):
+        return False
+    return True
+
+logger.remove()  # 移除默认处理器
+logger.add(sys.stderr, level="INFO", format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>", filter=filter_unwanted_logs)
+
+# 抑制 ml_backend 模块的日志输出
+import logging
+logging.getLogger("ml_backend").setLevel(logging.ERROR)
+logging.getLogger("ml_backend.core").setLevel(logging.ERROR)
+logging.getLogger("ml_backend.predict").setLevel(logging.ERROR)
 
 
 def get_images(image_path=None, image_dir=None, image_list=None):
@@ -266,7 +301,7 @@ def to_coco(results, output_file):
         coco["images"].append({"id": img_id, "file_name": os.path.basename(img_path), "width": w, "height": h})
         
         if hasattr(result, 'predictions') and result.predictions:
-            logger.debug(f"图片 {img_path} 有 {len(result.predictions)} 个预测结果")
+            # logger.debug(f"图片 {img_path} 有 {len(result.predictions)} 个预测结果")  # 已禁用 DEBUG 输出
             for pred in result.predictions:
                 if pred.name not in cat_map:
                     cat_map[pred.name] = cat_id
@@ -318,10 +353,13 @@ def main():
         logger.error("No images found")
         sys.exit(1)
     
-    # Load model
-    model_info = ModelInfo(model_id="dino", model_type="dino", checkpoint_path=args.checkpoint, mode=MODE.PREDICT)
-    predictor = DET02Predictor(model_info)
-    predictor.load_model()
+    # Load model (抑制 stdout 输出，如 num_classes 的 print)
+    import contextlib
+    import io
+    with contextlib.redirect_stdout(io.StringIO()):
+        model_info = ModelInfo(model_id="dino", model_type="dino", checkpoint_path=args.checkpoint, mode=MODE.PREDICT)
+        predictor = DET02Predictor(model_info)
+        predictor.load_model()
     
     # Predict
     results = []
@@ -330,11 +368,12 @@ def main():
         result.image_data = images[0]  # 使用image_data字段存储图片路径
         results.append(result)
     else:
+        from tqdm import tqdm
         batches = [images[i:i+args.batch_size] for i in range(0, len(images), args.batch_size)]
-        for batch in batches:
+        for batch in tqdm(batches, desc="Predicting"):
             batch_result = predictor.batch_predict(batch, args.threshold)
             for i, result in enumerate(batch_result.results):
-                print(result)
+                # print(result)  # 已禁用 print 输出
                 result.image_data = batch[i]  # 使用image_data字段存储图片路径
                 results.append(result)
     
@@ -357,7 +396,8 @@ def main():
         
         # Save visualization images
         logger.info(f"Saving visualization images to {preds_dir}")
-        for result in results:
+        from tqdm import tqdm
+        for result in tqdm(results, desc="Visualizing"):
             img_path = getattr(result, 'image_data', '')
             if not img_path or not isinstance(img_path, str) or not os.path.isfile(img_path):
                 continue
@@ -375,7 +415,7 @@ def main():
             img_name = os.path.basename(img_path)
             output_img_path = preds_dir / img_name
             cv2.imwrite(str(output_img_path), vis_img)
-            logger.debug(f"保存可视化图片: {output_img_path}")
+            # logger.debug(f"保存可视化图片: {output_img_path}")  # 已禁用 DEBUG 输出
         
         logger.info(f"输出完成: COCO JSON -> {coco_json_path}, 可视化图片 -> {preds_dir}")
     else:

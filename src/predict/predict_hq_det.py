@@ -10,12 +10,20 @@ import json
 import os
 import sys
 import re
+import warnings
 from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from loguru import logger
 import torch
+
+# 抑制 torch.load 的 FutureWarning
+warnings.filterwarnings('ignore', category=FutureWarning, message='.*torch.load.*weights_only.*')
+
+# 配置日志级别，减少 DEBUG 输出
+logger.remove()  # 移除默认处理器
+logger.add(sys.stderr, level="INFO", format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>")
 
 
 def get_images(image_path=None, image_dir=None, image_list=None):
@@ -390,7 +398,8 @@ def main():
         to_coco(results, str(coco_json_path), class_names=class_names)
         
         logger.info(f"Saving visualization images to {preds_dir}")
-        for result, img_path in results:
+        from tqdm import tqdm
+        for result, img_path in tqdm(results, desc="Visualizing"):
             if not img_path or not isinstance(img_path, str) or not os.path.isfile(img_path):
                 continue
             
@@ -403,7 +412,7 @@ def main():
             img_name = os.path.basename(img_path)
             output_img_path = preds_dir / img_name
             cv2.imwrite(str(output_img_path), vis_img)
-            logger.debug(f"保存可视化图片: {output_img_path}")
+            # logger.debug(f"保存可视化图片: {output_img_path}")  # 已禁用 DEBUG 输出
         
         logger.info(f"输出完成: COCO JSON -> {coco_json_path}, 可视化图片 -> {preds_dir}")
     else:
