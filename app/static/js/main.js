@@ -382,7 +382,23 @@ function runPrediction() {
             image_paths: uploadedImages
         })
     })
-    .then(response => response.json())
+    .then(async response => {
+        // 检查响应类型
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            // 如果不是 JSON，尝试读取文本查看错误信息
+            const text = await response.text();
+            throw new Error(`服务器返回了非 JSON 响应 (${response.status}): ${text.substring(0, 200)}`);
+        }
+        
+        // 检查 HTTP 状态码
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}: ${response.statusText}` }));
+            throw new Error(errorData.error || `请求失败: ${response.status}`);
+        }
+        
+        return response.json();
+    })
     .then(data => {
         if (data.error) {
             alert('预测失败: ' + data.error);
@@ -406,7 +422,15 @@ function runPrediction() {
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('预测失败: ' + error.message);
+        let errorMessage = '预测失败: ';
+        if (error.message) {
+            errorMessage += error.message;
+        } else if (typeof error === 'string') {
+            errorMessage += error;
+        } else {
+            errorMessage += '未知错误';
+        }
+        alert(errorMessage);
         btn.disabled = false;
         btn.textContent = '开始预测';
     });

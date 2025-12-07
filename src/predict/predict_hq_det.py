@@ -11,6 +11,7 @@ import os
 import sys
 import re
 import warnings
+import platform
 from pathlib import Path
 import cv2
 import numpy as np
@@ -51,15 +52,48 @@ def contains_chinese(text):
 
 
 def get_font(size):
-    """Get Chinese font with fallback"""
-    font_paths = [
+    """Get Chinese font with fallback (compatible with Windows, Linux, and macOS)"""
+    system = platform.system()
+    font_paths = []
+    
+    # Windows 系统字体路径
+    if system == "Windows":
+        windows_font_dir = os.path.join(os.environ.get("WINDIR", "C:/Windows"), "Fonts")
+        font_paths.extend([
+            os.path.join(windows_font_dir, "simsun.ttc"),      # 宋体
+            os.path.join(windows_font_dir, "simhei.ttf"),      # 黑体
+            os.path.join(windows_font_dir, "msyh.ttc"),        # 微软雅黑
+            os.path.join(windows_font_dir, "msyhbd.ttc"),      # 微软雅黑 Bold
+            os.path.join(windows_font_dir, "simkai.ttf"),      # 楷体
+            os.path.join(windows_font_dir, "simli.ttf"),       # 隶书
+        ])
+    # Linux 系统字体路径
+    elif system == "Linux":
+        font_paths.extend([
+            '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+            '/usr/share/fonts/truetype/arphic/uming.ttc',
+            '/opt/product/ml_backend/simsun.ttc',
+        ])
+    # macOS 系统字体路径
+    elif system == "Darwin":
+        font_paths.extend([
+            '/System/Library/Fonts/PingFang.ttc',
+            '/System/Library/Fonts/STHeiti Light.ttc',
+            '/System/Library/Fonts/STHeiti Medium.ttc',
+            '/Library/Fonts/Arial Unicode.ttf',
+        ])
+    
+    # 通用字体路径（跨平台）
+    font_paths.extend([
         '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
         '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
         '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
         '/usr/share/fonts/truetype/arphic/uming.ttc',
         '/opt/product/ml_backend/simsun.ttc',
         '/System/Library/Fonts/PingFang.ttc',
-    ]
+    ])
     
     for path in font_paths:
         if os.path.exists(path):

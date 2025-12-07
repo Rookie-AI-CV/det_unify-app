@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Flask Web Application for Model Prediction and Evaluation
+DetUnify Studio - 多模型检测统一工作平台
+Flask Web Application for Unified Model Prediction and Evaluation
 """
 
 import os
@@ -11,11 +12,14 @@ import json
 import cv2
 import numpy as np
 from pathlib import Path
+from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, send_from_directory, Response, send_file
 from werkzeug.utils import secure_filename
 import uuid
 from loguru import logger
 from collections import defaultdict
+import threading
+import time
 
 # Import prediction utilities
 import sys
@@ -23,10 +27,21 @@ ROOT_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 from src.predict.predict import detect_model_type
 
+# Import README generator from same directory
+from readme_generator import generate_readme
+
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024  # 2GB max file size
 app.config['UPLOAD_FOLDER'] = Path(__file__).parent / 'static' / 'uploads'
 app.config['RESULTS_FOLDER'] = Path(__file__).parent / 'static' / 'results'
+app.config['EXPORT_CACHE_FOLDER'] = Path(__file__).parent / 'static' / 'export_cache'
+
+# 确保导出缓存目录存在
+app.config['EXPORT_CACHE_FOLDER'].mkdir(parents=True, exist_ok=True)
+
+# 导出任务进度存储（task_id -> progress_info）
+export_tasks = {}
+export_tasks_lock = threading.Lock()
 
 # Global error handler to ensure JSON responses
 @app.errorhandler(404)
@@ -53,6 +68,104 @@ ALLOWED_IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'bmp'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def cleanup_old_results(max_age_hours=3):
+    """清理3小时前的预测结果数据"""
+    try:
+        results_folder = app.config['RESULTS_FOLDER']
+        if not results_folder.exists():
+            return
+        
+        cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
+        deleted_count = 0
+        deleted_size = 0
+        
+        for result_dir in results_folder.iterdir():
+            if not result_dir.is_dir():
+                continue
+            
+            try:
+                # 检查目录的最后修改时间
+                mtime = datetime.fromtimestamp(result_dir.stat().st_mtime)
+                
+                # 如果是结果目录，检查 results.json 文件的修改时间
+                results_file = result_dir / 'results.json'
+                if results_file.exists():
+                    file_mtime = datetime.fromtimestamp(results_file.stat().st_mtime)
+                    # 使用文件的修改时间，因为这代表预测完成的时间
+                    if file_mtime < cutoff_time:
+                        # 计算目录大小
+                        dir_size = sum(f.stat().st_size for f in result_dir.rglob('*') if f.is_file())
+                        # 删除目录
+                        shutil.rmtree(result_dir)
+                        deleted_count += 1
+                        deleted_size += dir_size
+                        logger.info(f"已清理过期预测结果: {result_dir.name} (创建时间: {file_mtime.strftime('%Y-%m-%d %H:%M:%S')})")
+                elif mtime < cutoff_time:
+                    # 如果没有 results.json，使用目录修改时间
+                    dir_size = sum(f.stat().st_size for f in result_dir.rglob('*') if f.is_file())
+                    shutil.rmtree(result_dir)
+                    deleted_count += 1
+                    deleted_size += dir_size
+                    logger.info(f"已清理过期预测结果目录: {result_dir.name} (修改时间: {mtime.strftime('%Y-%m-%d %H:%M:%S')})")
+            except Exception as e:
+                logger.warning(f"清理预测结果目录 {result_dir} 时出错: {e}")
+                continue
+        
+        if deleted_count > 0:
+            size_mb = deleted_size / (1024 * 1024)
+            logger.info(f"预测结果清理完成: 删除了 {deleted_count} 个目录，释放空间 {size_mb:.2f} MB")
+        
+    except Exception as e:
+        logger.error(f"清理预测结果时出错: {e}")
+
+
+def cleanup_old_uploads(max_age_hours=3):
+    """清理3小时前的上传数据"""
+    try:
+        upload_folder = app.config['UPLOAD_FOLDER']
+        if not upload_folder.exists():
+            return
+        
+        cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
+        deleted_count = 0
+        deleted_size = 0
+        
+        for session_dir in upload_folder.iterdir():
+            if not session_dir.is_dir():
+                continue
+            
+            try:
+                # 检查目录的最后修改时间
+                mtime = datetime.fromtimestamp(session_dir.stat().st_mtime)
+                
+                if mtime < cutoff_time:
+                    # 计算目录大小
+                    dir_size = sum(f.stat().st_size for f in session_dir.rglob('*') if f.is_file())
+                    # 删除目录
+                    shutil.rmtree(session_dir)
+                    deleted_count += 1
+                    deleted_size += dir_size
+                    logger.info(f"已清理过期上传数据: {session_dir.name} (修改时间: {mtime.strftime('%Y-%m-%d %H:%M:%S')})")
+            except Exception as e:
+                logger.warning(f"清理上传数据目录 {session_dir} 时出错: {e}")
+                continue
+        
+        if deleted_count > 0:
+            size_mb = deleted_size / (1024 * 1024)
+            logger.info(f"上传数据清理完成: 删除了 {deleted_count} 个目录，释放空间 {size_mb:.2f} MB")
+        
+    except Exception as e:
+        logger.error(f"清理上传数据时出错: {e}")
+
+
+def cleanup_old_cache(max_age_hours=3):
+    """清理所有过期缓存（预测结果和上传数据）"""
+    logger.info(f"开始清理 {max_age_hours} 小时前的缓存数据...")
+    cleanup_old_results(max_age_hours)
+    cleanup_old_uploads(max_age_hours)
+    logger.info("缓存清理完成")
 
 
 def allowed_image_file(filename):
@@ -498,6 +611,9 @@ def upload_data_by_path():
 def predict():
     """Run prediction using predict.py script"""
     try:
+        # 清理3小时前的缓存数据
+        cleanup_old_cache(max_age_hours=3)
+        
         # Ensure request has JSON content type
         if not request.is_json:
             return jsonify({'error': 'Content-Type must be application/json'}), 400
@@ -598,12 +714,41 @@ def predict():
             elif model_info['type'] == 'dino':
                 cmd.extend(['--model-type', 'dino'])
             
-            # Run prediction script
+            # Run prediction script with real-time output
             try:
                 import subprocess
-                result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT_DIR))
-                if result.returncode != 0:
-                    logger.error(f"Prediction failed for model {model_path}: {result.stderr}")
+                logger.info(f"开始执行预测: {' '.join(cmd)}")
+                logger.info(f"模型 {model_idx + 1}/{len(model_configs)}: {model_info['name']}")
+                
+                # 使用 Popen 实时打印输出
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,  # 将 stderr 合并到 stdout
+                    text=True,
+                    cwd=str(ROOT_DIR)
+                )
+                
+                # 实时读取并打印输出
+                stderr_lines = []
+                while True:
+                    output = process.stdout.readline()
+                    if output == '' and process.poll() is not None:
+                        break
+                    if output:
+                        line = output.rstrip('\n\r')
+                        if line:
+                            print(line, flush=True)  # 实时打印到控制台
+                            # 如果是错误信息，也记录下来
+                            if any(keyword in line.lower() for keyword in ['error', 'warning', 'failed', 'exception']):
+                                stderr_lines.append(line)
+                
+                # 确保进程完成
+                process.wait()
+                
+                if process.returncode != 0:
+                    error_msg = '\n'.join(stderr_lines) if stderr_lines else f"预测失败，返回码: {process.returncode}"
+                    logger.error(f"Prediction failed for model {model_path}: {error_msg}")
                     continue
                 
                 # Load COCO JSON
@@ -744,7 +889,10 @@ def predict():
                     'image': f'/static/results/{result_id}/{img_name}',
                     'predictions': img_predictions,
                     'notes': '',  # Initialize notes field
-                    'status': None  # Initialize status field (None, 'false_positive', or 'missed')
+                    'statuses': [],  # Initialize statuses field (list of 'false_positive', 'missed', 'low_confidence')
+                    'false_positive_labels': [],  # Initialize false positive labels (list of label names for false positive bboxes)
+                    'missed_labels': [],  # Initialize missed labels (list of label names for missed detections)
+                    'low_confidence_labels': []  # Initialize low confidence labels (list of label names for low confidence detections)
                 }
         
         if not predictions:
@@ -847,7 +995,10 @@ def save_image_notes(result_id):
         
         image_name = data.get('image')
         notes = data.get('notes', '')
-        status = data.get('status')  # 'false_positive', 'missed', or None
+        statuses = data.get('statuses', [])  # List of 'false_positive', 'missed', 'low_confidence'
+        false_positive_labels = data.get('false_positive_labels', [])  # List of label names for false positive bboxes
+        missed_labels = data.get('missed_labels', [])  # List of label names for missed detections
+        low_confidence_labels = data.get('low_confidence_labels', [])  # List of label names for low confidence detections
         
         # Load existing results.json
         results_file = result_dir / 'results.json'
@@ -861,12 +1012,46 @@ def save_image_notes(result_id):
             logger.error(f"JSON decode error when loading results.json: {e}")
             return jsonify({'error': f'Invalid JSON in results file: {str(e)}'}), 500
         
-        # Update notes and status for the image
+        # Update notes and statuses for the image
         if image_name in results_data.get('predictions', {}):
             # Ensure notes is a string and handle None
             notes_str = str(notes) if notes is not None else ''
             results_data['predictions'][image_name]['notes'] = notes_str
-            results_data['predictions'][image_name]['status'] = status
+            
+            # Update statuses (list)
+            if isinstance(statuses, list):
+                results_data['predictions'][image_name]['statuses'] = statuses
+            else:
+                # Backward compatibility: if status is provided as single value
+                old_status = data.get('status')
+                if old_status:
+                    results_data['predictions'][image_name]['statuses'] = [old_status] if old_status else []
+                else:
+                    results_data['predictions'][image_name]['statuses'] = []
+            
+            # Update false_positive_labels (list)
+            if isinstance(false_positive_labels, list):
+                results_data['predictions'][image_name]['false_positive_labels'] = false_positive_labels
+            else:
+                results_data['predictions'][image_name]['false_positive_labels'] = []
+            
+            # Update missed_labels (list)
+            if isinstance(missed_labels, list):
+                results_data['predictions'][image_name]['missed_labels'] = missed_labels
+            else:
+                results_data['predictions'][image_name]['missed_labels'] = []
+            
+            # Update low_confidence_labels (list)
+            if isinstance(low_confidence_labels, list):
+                results_data['predictions'][image_name]['low_confidence_labels'] = low_confidence_labels
+            else:
+                results_data['predictions'][image_name]['low_confidence_labels'] = []
+            
+            # Backward compatibility: maintain old 'status' field for now
+            if results_data['predictions'][image_name].get('statuses'):
+                results_data['predictions'][image_name]['status'] = results_data['predictions'][image_name]['statuses'][0]
+            else:
+                results_data['predictions'][image_name]['status'] = None
             
             # Save back to file with error handling
             try:
@@ -886,607 +1071,157 @@ def save_image_notes(result_id):
         return jsonify({'error': str(e)}), 500
 
 
-def generate_readme(results_data, model_dirs, model_names_map):
-    """Generate a beautiful HTML README file with model info and statistics"""
-    from datetime import datetime
-    import html as html_lib  # Import html module with alias to avoid conflict
-    
-    model_infos = results_data.get('model_infos', [])
-    label_colors = results_data.get('label_colors', {})
-    predictions = results_data.get('predictions', {})
-    
-    # Statistics: Count predictions per model per label
-    stats = {}  # {model_name: {label: count}}
-    total_images = len(predictions)
-    total_predictions = 0
-    
-    # Initialize stats for all models
-    for model_info in model_infos:
-        model_name = model_info.get('name', 'Unknown')
-        stats[model_name] = {}
-    
-    # Count predictions from all images
-    for img_name, img_data in predictions.items():
-        for pred_group in img_data.get('predictions', []):
-            model_name = pred_group.get('full_name', pred_group.get('model_name', 'Unknown'))
-            if model_name not in stats:
-                stats[model_name] = {}
-            
-            for bbox in pred_group.get('bboxes', []):
-                label = bbox.get('label', 'unknown')
-                stats[model_name][label] = stats[model_name].get(label, 0) + 1
-                total_predictions += 1
-    
-    # Collect all unique labels
-    all_labels = set()
-    for model_stats in stats.values():
-        all_labels.update(model_stats.keys())
-    all_labels = sorted(all_labels)
-    
-    # Style descriptions
-    style_map = {
-        'solid': '实线',
-        'dashed': '虚线',
-        'dotted': '点线',
-        'dashdot': '点划线'
-    }
-    
-    # Generate HTML
-    html = f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>预测结果说明文档</title>
-    <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 20px;
-            min-height: 100vh;
-        }}
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            overflow: hidden;
-        }}
-        .header {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 40px;
-            text-align: center;
-        }}
-        .header h1 {{
-            font-size: 2.5em;
-            margin-bottom: 10px;
-            font-weight: 700;
-        }}
-        .header p {{
-            font-size: 1.1em;
-            opacity: 0.9;
-        }}
-        .content {{
-            padding: 40px;
-        }}
-        .section {{
-            margin-bottom: 40px;
-        }}
-        .section h2 {{
-            color: #667eea;
-            font-size: 1.8em;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 3px solid #667eea;
-        }}
-        .section h3 {{
-            color: #764ba2;
-            font-size: 1.4em;
-            margin: 30px 0 15px 0;
-        }}
-        .model-card {{
-            background: #f8f9fa;
-            border-left: 4px solid #667eea;
-            padding: 20px;
-            margin-bottom: 20px;
-            border-radius: 8px;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }}
-        .model-card:hover {{
-            transform: translateX(5px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }}
-        .model-name {{
-            font-size: 1.3em;
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 10px;
-        }}
-        .model-info {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-top: 15px;
-        }}
-        .info-item {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }}
-        .info-label {{
-            font-weight: 600;
-            color: #666;
-            min-width: 80px;
-        }}
-        .info-value {{
-            color: #333;
-        }}
-        .line-style-demo {{
-            display: inline-block;
-            width: 60px;
-            height: 3px;
-            margin: 0 8px;
-            vertical-align: middle;
-        }}
-        .line-style-demo.solid {{
-            border-bottom: 3px solid #333;
-            border-bottom-style: solid;
-        }}
-        .line-style-demo.dashed {{
-            border-bottom: 3px solid #333;
-            border-bottom-style: dashed;
-        }}
-        .line-style-demo.dotted {{
-            border-bottom: 3px solid #333;
-            border-bottom-style: dotted;
-        }}
-        .line-style-demo.dashdot {{
-            border-bottom: 3px solid #333;
-            border-bottom-style: dashdot;
-        }}
-        .label-color-box {{
-            display: inline-block;
-            width: 24px;
-            height: 24px;
-            border-radius: 4px;
-            border: 2px solid #ddd;
-            vertical-align: middle;
-            margin-right: 8px;
-        }}
-        .stats-table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-            background: white;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }}
-        .stats-table th {{
-            background: #667eea;
-            color: white;
-            padding: 15px;
-            text-align: left;
-            font-weight: 600;
-        }}
-        .stats-table td {{
-            padding: 12px 15px;
-            border-bottom: 1px solid #eee;
-        }}
-        .stats-table tr:hover {{
-            background: #f8f9fa;
-        }}
-        .stats-table tr:last-child td {{
-            border-bottom: none;
-        }}
-        .number-badge {{
-            display: inline-block;
-            background: #667eea;
-            color: white;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 0.9em;
-        }}
-        .summary-cards {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin: 20px 0;
-        }}
-        .summary-card {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 25px;
-            border-radius: 10px;
-            text-align: center;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-        }}
-        .summary-card h3 {{
-            font-size: 0.9em;
-            opacity: 0.9;
-            margin-bottom: 10px;
-            color: white;
-        }}
-        .summary-card .value {{
-            font-size: 2.5em;
-            font-weight: bold;
-        }}
-        .footer {{
-            background: #f8f9fa;
-            padding: 20px 40px;
-            text-align: center;
-            color: #666;
-            border-top: 1px solid #eee;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>📊 预测结果说明文档</h1>
-            <p>生成时间: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}</p>
-        </div>
-        
-        <div class="content">
-            <!-- Summary Section -->
-            <div class="section">
-                <h2>📈 总体统计</h2>
-                <div class="summary-cards">
-                    <div class="summary-card">
-                        <h3>图片总数</h3>
-                        <div class="value">{total_images}</div>
-                    </div>
-                    <div class="summary-card">
-                        <h3>检测框总数</h3>
-                        <div class="value">{total_predictions}</div>
-                    </div>
-                    <div class="summary-card">
-                        <h3>模型数量</h3>
-                        <div class="value">{len(model_infos)}</div>
-                    </div>
-                    <div class="summary-card">
-                        <h3>标签类别</h3>
-                        <div class="value">{len(all_labels)}</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Model Information Section -->
-            <div class="section">
-                <h2>🤖 模型信息</h2>
-"""
-    
-    # Add model cards
-    for model_info in model_infos:
-        model_name = model_info.get('name', 'Unknown')
-        model_type = model_info.get('type', 'Unknown')
-        sub_type = model_info.get('sub_type', '')
-        line_style = model_info.get('line_style', 'solid')
-        style_desc = model_info.get('style_desc', style_map.get(line_style, '实线'))
-        
-        model_total = sum(stats.get(model_name, {}).values())
-        
-        html += f"""
-                <div class="model-card">
-                    <div class="model-name">🔹 {model_name}</div>
-                    <div class="model-info">
-                        <div class="info-item">
-                            <span class="info-label">模型类型:</span>
-                            <span class="info-value">{model_type}{' - ' + sub_type if sub_type else ''}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">线条风格:</span>
-                            <span class="info-value">
-                                <span class="line-style-demo {line_style}"></span>
-                                {style_desc}
-                            </span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">检测总数:</span>
-                            <span class="info-value"><span class="number-badge">{model_total}</span></span>
-                        </div>
-                    </div>
-                </div>
-"""
-    
-    html += """
-            </div>
-            
-            <!-- Label Colors Section -->
-            <div class="section">
-                <h2>🎨 标签颜色说明</h2>
-                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-top: 20px;">
-"""
-    
-    # Add label colors
-    for label in all_labels:
-        color = label_colors.get(label, [128, 128, 128])
-        html += f"""
-                    <div style="display: flex; align-items: center; padding: 10px; background: #f8f9fa; border-radius: 6px;">
-                        <span class="label-color-box" style="background-color: rgb({color[0]}, {color[1]}, {color[2]});"></span>
-                        <span style="font-weight: 500;">{label}</span>
-                    </div>
-"""
-    
-    html += """
-                </div>
-            </div>
-            
-            <!-- Statistics Section -->
-            <div class="section">
-                <h2>📊 详细统计</h2>
-                <h3>各模型标签检测数量统计</h3>
-                <table class="stats-table">
-                    <thead>
-                        <tr>
-                            <th>标签</th>
-"""
-    
-    # Add model columns
-    for model_info in model_infos:
-        model_name = model_info.get('name', 'Unknown')
-        short_name = model_info.get('short_name', model_name)
-        html += f'                            <th>{short_name}</th>\n'
-    
-    html += """                            <th>总计</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-"""
-    
-    # Add statistics rows
-    for label in all_labels:
-        html += f'                        <tr>\n                            <td style="font-weight: 600;">{label}</td>\n'
-        label_total = 0
-        for model_info in model_infos:
-            model_name = model_info.get('name', 'Unknown')
-            count = stats.get(model_name, {}).get(label, 0)
-            label_total += count
-            html += f'                            <td style="text-align: center;"><span class="number-badge">{count}</span></td>\n'
-        html += f'                            <td style="text-align: center; font-weight: bold;"><span class="number-badge">{label_total}</span></td>\n                        </tr>\n'
-    
-    html += """                    </tbody>
-                </table>
-            </div>
-            
-            <!-- Image Notes and Status Section -->
-            <div class="section">
-                <h2>📝 图片备注与状态</h2>
-"""
-    
-    # Collect images with notes or status
-    images_with_info = []
-    false_positive_count = 0
-    missed_count = 0
-    
-    for img_name, img_data in predictions.items():
-        # Safely get notes and status, handle None and non-string values
-        notes = img_data.get('notes', '')
-        if notes is None:
-            notes = ''
-        else:
-            notes = str(notes).strip()
-        
-        status = img_data.get('status')
-        if notes or status:
-            images_with_info.append({
-                'name': str(img_name),
-                'notes': notes,
-                'status': status
-            })
-            if status == 'false_positive':
-                false_positive_count += 1
-            elif status == 'missed':
-                missed_count += 1
-    
-    if images_with_info:
-        html += f"""
-                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-top: 20px;">
-                    <h3>标注统计</h3>
-                    <div style="display: flex; gap: 20px; margin-bottom: 20px;">
-                        <div style="background: #e74c3c; color: white; padding: 10px 20px; border-radius: 6px;">
-                            <strong>误检图片:</strong> {false_positive_count} 张
-                        </div>
-                        <div style="background: #f39c12; color: white; padding: 10px 20px; border-radius: 6px;">
-                            <strong>漏检图片:</strong> {missed_count} 张
-                        </div>
-                    </div>
-                    <table class="stats-table">
-                        <thead>
-                            <tr>
-                                <th>图片名称</th>
-                                <th>状态</th>
-                                <th>备注</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-"""
-        for img_info in sorted(images_with_info, key=lambda x: x['name']):
-            status_text = ''
-            status_class = ''
-            if img_info['status'] == 'false_positive':
-                status_text = '<span style="background: #e74c3c; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.9em;">误检</span>'
-            elif img_info['status'] == 'missed':
-                status_text = '<span style="background: #f39c12; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.9em;">漏检</span>'
-            else:
-                status_text = '<span style="color: #999;">-</span>'
-            
-            notes_raw = img_info.get('notes', '') or ''
-            if notes_raw:
-                # Escape HTML special characters in notes
-                notes_display = html_lib.escape(str(notes_raw))
-            else:
-                notes_display = '<span style="color: #999; font-style: italic;">无备注</span>'
-            
-            html += f"""
-                            <tr>
-                                <td style="font-weight: 500;">{html_lib.escape(str(img_info.get('name', '')))}</td>
-                                <td>{status_text}</td>
-                                <td style="max-width: 400px; word-wrap: break-word;">{notes_display}</td>
-                            </tr>
-"""
-        html += """
-                        </tbody>
-                    </table>
-                </div>
-"""
-    else:
-        html += """
-                <p style="color: #999; font-style: italic;">暂无图片备注或状态标记</p>
-"""
-    
-    html += """
-            </div>
-            
-            <!-- Directory Structure Section -->
-            <div class="section">
-                <h2>📁 目录结构说明</h2>
-                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; font-family: 'Courier New', monospace; line-height: 1.8;">
-                    <div style="margin-bottom: 10px;"><strong>predictions.zip</strong></div>
-"""
-    
-    for model_info in model_infos:
-        model_name = model_info.get('name', 'Unknown')
-        safe_name = secure_filename(model_name) or f'模型_{model_infos.index(model_info) + 1}'
-        html += f'                    <div style="margin-left: 20px;">├── <strong>{safe_name}/</strong></div>\n'
-        html += f'                    <div style="margin-left: 40px;">└── _annotations.coco.json</div>\n'
-    
-    html += """                    <div style="margin-left: 20px;">├── <strong>images/</strong></div>
-                    <div style="margin-left: 40px;">├── *.jpg (标注后的可视化图片)</div>
-                    <div style="margin-left: 40px;">└── *.png (标注后的可视化图片)</div>
-"""
-    if false_positive_count > 0:
-        html += """                    <div style="margin-left: 20px;">├── <strong>false_positives/</strong></div>
-                    <div style="margin-left: 40px;">└── 误检图片原图</div>
-"""
-    if missed_count > 0:
-        html += """                    <div style="margin-left: 20px;">└── <strong>missed/</strong></div>
-                    <div style="margin-left: 40px;">└── 漏检图片原图</div>
-"""
-    html += """                </div>
-            </div>
-        </div>
-        
-        <div class="footer">
-            <p>Generated by Detection Prediction System | 本报告由目标检测预测系统自动生成</p>
-        </div>
-    </div>
-</body>
-</html>
-"""
-    
-    return html
 
 
-@app.route('/api/export/<result_id>')
-def export_results(result_id):
-    """Export prediction results as ZIP file (COCO JSON + visualized images)"""
+def _export_results_with_progress(result_id, description, export_originals, export_models, progress_callback=None):
+    """执行导出任务，支持进度回调
+    
+    Args:
+        result_id: 结果ID
+        description: 说明信息
+        export_originals: 是否导出原图
+        export_models: 是否导出模型文件
+        progress_callback: 进度回调函数 callback(stage, detail, progress)
+    
+    Returns:
+        zip_buffer: BytesIO对象，包含ZIP文件数据
+    """
+    result_dir = app.config['RESULTS_FOLDER'] / result_id
+    if not result_dir.exists():
+        raise FileNotFoundError('Result not found')
+    
+    # Load results.json to get prediction data
+    results_file = result_dir / 'results.json'
+    if not results_file.exists():
+        raise FileNotFoundError('Results file not found')
+    
     try:
-        result_dir = app.config['RESULTS_FOLDER'] / result_id
-        if not result_dir.exists():
-            return jsonify({'error': 'Result not found'}), 404
-        
-        # Load results.json to get prediction data
-        results_file = result_dir / 'results.json'
-        if not results_file.exists():
-            return jsonify({'error': 'Results file not found'}), 404
-        
-        try:
-            with open(results_file, 'r', encoding='utf-8') as f:
-                results_data = json.load(f)
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error in results.json: {e}")
-            logger.error(f"File path: {results_file}")
-            # Try to read raw content for debugging
+        with open(results_file, 'r', encoding='utf-8') as f:
+            results_data = json.load(f)
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error in results.json: {e}")
+        raise ValueError(f'Invalid JSON in results file: {str(e)}')
+    
+    if progress_callback:
+        progress_callback('正在读取结果数据...', '加载预测结果和模型信息', 5)
+    
+    # Create temporary ZIP file
+    import tempfile
+    import io
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        # Find all model output directories and get model names
+        # Sort by numeric index in directory name (model_0, model_1, ...)
+        def get_model_index(path):
             try:
-                with open(results_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    logger.error(f"File size: {len(content)} bytes")
-                    if len(content) > 0:
-                        logger.error(f"First 500 chars: {content[:500]}")
-                        if len(content) > 500:
-                            logger.error(f"Last 500 chars: {content[-500:]}")
-            except Exception as debug_e:
-                logger.error(f"Error reading file for debug: {debug_e}")
-            return jsonify({'error': f'Invalid JSON in results file: {str(e)}'}), 500
+                return int(path.name.split('_')[1])
+            except (ValueError, IndexError):
+                return 999
         
-        # Create temporary ZIP file
-        import tempfile
-        import io
-        zip_buffer = io.BytesIO()
+        model_dirs = sorted(result_dir.glob('model_*'), key=get_model_index)
+        model_names_map = {}  # model_dir -> model_name
         
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            # Find all model output directories and get model names
-            # Sort by numeric index in directory name (model_0, model_1, ...)
-            def get_model_index(path):
-                try:
-                    return int(path.name.split('_')[1])
-                except (ValueError, IndexError):
-                    return 999
+        # Get model names from results.json
+        model_infos = results_data.get('model_infos', [])
+        for idx, model_info in enumerate(model_infos):
+            model_name = model_info.get('name', f'模型_{idx+1}')
+            # 确保 model_name 不是 None，并且是字符串类型
+            if model_name is None:
+                model_name = f'模型_{idx+1}'
+            else:
+                model_name = str(model_name)
             
-            model_dirs = sorted(result_dir.glob('model_*'), key=get_model_index)
-            model_names_map = {}  # model_dir -> model_name
-            
-            # Get model names from results.json
-            model_infos = results_data.get('model_infos', [])
-            for idx, model_info in enumerate(model_infos):
-                model_name = model_info.get('name', f'模型_{idx+1}')
-                # Use full name as directory name, sanitize for filesystem
+            # Use full name as directory name, sanitize for filesystem
+            try:
                 safe_model_name = secure_filename(model_name)
                 if not safe_model_name:
                     safe_model_name = f'模型_{idx+1}'
-                
-                # Match model directory by index (model_0 corresponds to index 0)
-                if idx < len(model_dirs):
-                    model_names_map[model_dirs[idx]] = safe_model_name
+            except (TypeError, AttributeError) as e:
+                logger.warning(f"secure_filename failed for model name '{model_name}': {e}")
+                safe_model_name = f'模型_{idx+1}'
             
-            # 1. Export each model's COCO file to its own directory
-            for model_dir in model_dirs:
-                coco_json_path = model_dir / '_annotations.coco.json'
-                if not coco_json_path.exists():
-                    continue
-                
-                # Get model name for this directory
-                model_name = model_names_map.get(model_dir, model_dir.name)
-                
-                # Read COCO JSON
-                coco_data = load_coco_json(coco_json_path)
-                if not coco_data:
-                    continue
-                
-                # Write to ZIP: model_name/_annotations.coco.json
-                coco_json_str = json.dumps(coco_data, ensure_ascii=False, indent=2)
-                zip_path = f"{model_name}/_annotations.coco.json"
-                zip_file.writestr(zip_path, coco_json_str.encode('utf-8'))
+            # Match model directory by index (model_0 corresponds to index 0)
+            if idx < len(model_dirs):
+                model_names_map[model_dirs[idx]] = safe_model_name
+        
+        if progress_callback:
+            progress_callback('正在打包模型文件...', '正在添加模型COCO文件到压缩包', 15)
+        
+        # 1. Export each model's COCO file to its own directory
+        total_models = len(model_dirs)
+        for idx, model_dir in enumerate(model_dirs):
+            coco_json_path = model_dir / '_annotations.coco.json'
+            if not coco_json_path.exists():
+                continue
             
-            # 2. Add all visualized images to images/ directory
-            image_files = []
-            for ext in ['*.jpg', '*.jpeg', '*.png']:
-                for img_file in result_dir.glob(ext):
-                    if img_file.is_file() and not any(
-                        str(img_file).startswith(str(model_dir))
-                        for model_dir in model_dirs
-                    ):
-                        image_files.append(img_file)
+            # Get model name for this directory
+            model_name = model_names_map.get(model_dir, model_dir.name)
             
-            for img_file in sorted(image_files):
-                zip_path = f"images/{img_file.name}"
-                zip_file.write(img_file, zip_path)
+            # Read COCO JSON
+            coco_data = load_coco_json(coco_json_path)
+            if not coco_data:
+                continue
             
-            # 3. Save original images for false positives and missed detections
+            # Write to ZIP: model_name/_annotations.coco.json
+            coco_json_str = json.dumps(coco_data, ensure_ascii=False, indent=2)
+            zip_path = f"{model_name}/_annotations.coco.json"
+            zip_file.writestr(zip_path, coco_json_str.encode('utf-8'))
+            
+            if progress_callback:
+                progress = 15 + int((idx + 1) / total_models * 10) if total_models > 0 else 20
+                progress_callback('正在打包模型文件...', f'已处理 {idx + 1}/{total_models} 个模型', progress)
+        
+        # Export model files if requested
+        if export_models:
+            if progress_callback:
+                progress_callback('正在打包模型文件...', '正在添加模型权重文件', 25)
+            model_infos_list = results_data.get('model_infos', [])
+            for idx, model_dir in enumerate(model_dirs):
+                if idx < len(model_infos_list):
+                    model_info = model_infos_list[idx]
+                    model_file_path = Path(model_info.get('path', ''))
+                    if model_file_path.exists() and model_file_path.is_file():
+                        # Get model name for this directory
+                        model_name = model_names_map.get(model_dir, model_dir.name)
+                        # Copy model file to model directory in ZIP
+                        model_file_name = model_file_path.name
+                        zip_path = f"{model_name}/{model_file_name}"
+                        try:
+                            zip_file.write(model_file_path, zip_path)
+                        except Exception as e:
+                            logger.warning(f"Failed to export model file {model_file_path}: {e}")
+        
+        if progress_callback:
+            progress_callback('正在打包图片文件...', '正在添加标注图片到压缩包', 30)
+        
+        # 2. Add all visualized images to 标注图/ directory
+        image_files = []
+        for ext in ['*.jpg', '*.jpeg', '*.png']:
+            for img_file in result_dir.glob(ext):
+                if img_file.is_file() and not any(
+                    str(img_file).startswith(str(model_dir))
+                    for model_dir in model_dirs
+                ):
+                    image_files.append(img_file)
+        
+        total_images = len(image_files)
+        for idx, img_file in enumerate(sorted(image_files)):
+            zip_path = f"标注图/{img_file.name}"
+            zip_file.write(img_file, zip_path)
+            if progress_callback and total_images > 0:
+                progress = 30 + int((idx + 1) / total_images * 20) if total_images > 0 else 50
+                progress_callback('正在打包图片文件...', f'已处理 {idx + 1}/{total_images} 张图片', progress)
+        
+        # 3. Export all original images to 原图/ directory
+        if export_originals:
+            if progress_callback:
+                progress_callback('正在查找原图文件...', '正在搜索所有原图文件路径', 50)
+            
             predictions = results_data.get('predictions', {})
-            false_positive_images = []
-            missed_images = []
+            
+            # 收集所有预测结果中的图片名称
+            all_image_names = set(predictions.keys())
             
             # Find original image paths (check upload folder by session)
             # Try to find original images from upload folder
@@ -1515,44 +1250,230 @@ def export_results(result_id):
                                         if img_name not in original_images_map:
                                             original_images_map[img_name] = orig_img
             
-            # Categorize images by status
-            for img_name, img_data in predictions.items():
-                status = img_data.get('status')
-                if status == 'false_positive':
-                    false_positive_images.append(img_name)
-                elif status == 'missed':
-                    missed_images.append(img_name)
+            # Export all original images that have predictions
+            if progress_callback:
+                progress_callback('正在打包原图文件...', '正在添加所有原图到压缩包', 60)
             
-            # Add false positive original images
-            for img_name in false_positive_images:
+            # 只导出有预测结果的原图
+            images_to_export = [img_name for img_name in all_image_names if img_name in original_images_map]
+            total_originals = len(images_to_export)
+            
+            for idx, img_name in enumerate(sorted(images_to_export)):
                 if img_name in original_images_map:
                     orig_path = original_images_map[img_name]
-                    zip_path = f"false_positives/{img_name}"
+                    zip_path = f"原图/{img_name}"
                     zip_file.write(orig_path, zip_path)
-            
-            # Add missed detection original images
-            for img_name in missed_images:
-                if img_name in original_images_map:
-                    orig_path = original_images_map[img_name]
-                    zip_path = f"missed/{img_name}"
-                    zip_file.write(orig_path, zip_path)
-            
-            # 4. Generate and add README file
-            readme_content = generate_readme(results_data, model_dirs, model_names_map)
-            zip_file.writestr('README.html', readme_content.encode('utf-8'))
+                    if progress_callback and total_originals > 0:
+                        progress = 60 + int((idx + 1) / total_originals * 30) if total_originals > 0 else 90
+                        progress_callback('正在打包原图文件...', f'已处理 {idx + 1}/{total_originals} 张原图', progress)
         
-        # Prepare response
+        if progress_callback:
+            progress_callback('正在生成报告...', '正在生成README.html报告文件', 85)
+        
+        # 4. Generate and add README file
+        readme_content = generate_readme(results_data, model_dirs, model_names_map, description=description, result_id=result_id)
+        zip_file.writestr('README.html', readme_content.encode('utf-8'))
+        
+        if progress_callback:
+            progress_callback('正在完成打包...', '正在完成ZIP文件压缩', 95)
+        
         zip_buffer.seek(0)
-        return send_file(
-            zip_buffer,
-            mimetype='application/zip',
-            as_attachment=True,
-            download_name=f'predictions_{result_id}.zip'
-        )
+        if progress_callback:
+            progress_callback('导出完成！', 'ZIP文件已生成', 100)
+        
+        return zip_buffer
+
+
+@app.route('/api/export/<result_id>')
+def export_results(result_id):
+    """Export prediction results as ZIP file with real-time progress via SSE"""
+    try:
+        # 获取查询参数：说明信息、导出选项
+        description = request.args.get('description', '').strip()
+        export_originals = request.args.get('export_originals', '1') == '1'  # 默认导出原图
+        export_models = request.args.get('export_models', '0') == '1'  # 默认不导出模型文件
+        
+        # 用于存储进度的队列
+        progress_queue = []
+        progress_lock = threading.Lock()
+        
+        def progress_callback(stage, detail, progress):
+            """进度回调函数，将进度存储到队列"""
+            with progress_lock:
+                progress_queue.append({
+                    'stage': stage,
+                    'detail': detail,
+                    'progress': progress
+                })
+        
+        def generate():
+            """生成器函数，用于SSE流式响应"""
+            try:
+                # 在后台线程执行导出
+                zip_buffer = None
+                export_error = None
+                
+                def export_thread():
+                    nonlocal zip_buffer, export_error
+                    try:
+                        zip_buffer = _export_results_with_progress(
+                            result_id, description, export_originals, export_models,
+                            progress_callback=progress_callback
+                        )
+                    except Exception as e:
+                        export_error = e
+                        logger.error(f"Export error: {e}", exc_info=True)
+                
+                # 启动导出线程
+                thread = threading.Thread(target=export_thread)
+                thread.daemon = True
+                thread.start()
+                
+                # 持续发送进度，直到导出完成
+                last_progress = -1
+                while thread.is_alive() or len(progress_queue) > 0:
+                    # 发送队列中的进度
+                    with progress_lock:
+                        while len(progress_queue) > 0:
+                            progress_info = progress_queue.pop(0)
+                            data = json.dumps(progress_info, ensure_ascii=False)
+                            yield f"data: {data}\n\n"
+                            last_progress = progress_info.get('progress', last_progress)
+                    
+                    time.sleep(0.1)  # 避免CPU占用过高
+                
+                # 等待线程完全完成（增加超时时间）
+                thread.join(timeout=300)  # 最多等待5分钟
+                
+                if thread.is_alive():
+                    # 线程超时，返回错误
+                    error_data = {
+                        'stage': '导出失败',
+                        'detail': '导出超时，请重试',
+                        'progress': 0,
+                        'error': '导出超时'
+                    }
+                    yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                    return
+                
+                # 检查是否有错误
+                if export_error:
+                    error_data = {
+                        'stage': '导出失败',
+                        'detail': f'错误: {str(export_error)}',
+                        'progress': 0,
+                        'error': str(export_error)
+                    }
+                    yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                    return
+                
+                # 检查zip_buffer是否生成
+                if not zip_buffer:
+                    error_data = {
+                        'stage': '导出失败',
+                        'detail': 'ZIP文件生成失败',
+                        'progress': 0,
+                        'error': 'ZIP文件生成失败'
+                    }
+                    yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                    return
+                
+                # 将ZIP文件保存到临时文件，返回文件路径
+                try:
+                    import tempfile
+                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.zip', dir=str(app.config['EXPORT_CACHE_FOLDER']))
+                    zip_buffer.seek(0)
+                    zip_data = zip_buffer.read()
+                    if len(zip_data) == 0:
+                        temp_file.close()
+                        error_data = {
+                            'stage': '导出失败',
+                            'detail': 'ZIP文件为空',
+                            'progress': 0,
+                            'error': 'ZIP文件为空'
+                        }
+                        yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                        return
+                    
+                    temp_file.write(zip_data)
+                    temp_file.close()
+                    
+                    # 生成任务ID
+                    task_id = str(uuid.uuid4())
+                    with export_tasks_lock:
+                        export_tasks[task_id] = {
+                            'file_path': temp_file.name,
+                            'filename': f'predictions_{result_id}.zip',
+                            'created_at': datetime.now()
+                        }
+                    
+                    # 发送完成信号和文件下载信息（合并为一个消息，确保前端能同时收到）
+                    complete_data = {
+                        'stage': '导出完成！',
+                        'detail': 'ZIP文件已生成，正在下载',
+                        'progress': 100,
+                        'complete': True,
+                        'ready': True,
+                        'task_id': task_id
+                    }
+                    yield f"data: {json.dumps(complete_data, ensure_ascii=False)}\n\n"
+                    
+                except Exception as save_error:
+                    logger.error(f"Error saving ZIP file: {save_error}", exc_info=True)
+                    error_data = {
+                        'stage': '导出失败',
+                        'detail': f'保存ZIP文件失败: {str(save_error)}',
+                        'progress': 0,
+                        'error': f'保存ZIP文件失败: {str(save_error)}'
+                    }
+                    yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                    return
+                
+            except Exception as e:
+                logger.error(f"Error in export generation: {e}", exc_info=True)
+                error_data = {
+                    'stage': '导出失败',
+                    'detail': f'错误: {str(e)}',
+                    'progress': 0,
+                    'error': str(e)
+                }
+                yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+        
+        return Response(generate(), mimetype='text/event-stream', headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'
+        })
         
     except Exception as e:
         logger.error(f"Error exporting results: {e}", exc_info=True)
         return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+@app.route('/api/export/download/<task_id>')
+def download_export(task_id):
+    """下载导出完成的ZIP文件"""
+    try:
+        with export_tasks_lock:
+            if task_id not in export_tasks:
+                return jsonify({'error': 'Task not found'}), 404
+            
+            task_info = export_tasks[task_id]
+            file_path = Path(task_info['file_path'])
+            filename = task_info['filename']
+            
+            if not file_path.exists():
+                return jsonify({'error': 'Export file not found'}), 404
+            
+            # 发送文件
+            return send_file(
+                str(file_path),
+                mimetype='application/zip',
+                as_attachment=True,
+                download_name=filename
+            )
+    except Exception as e:
+        logger.error(f"Error downloading export: {e}", exc_info=True)
+        return jsonify({'error': f'Download failed: {str(e)}'}), 500
 
 
 if __name__ == '__main__':

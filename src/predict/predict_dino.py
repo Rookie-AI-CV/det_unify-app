@@ -11,6 +11,7 @@ import os
 import sys
 import re
 import warnings
+import platform
 from pathlib import Path
 import cv2
 import numpy as np
@@ -80,15 +81,48 @@ def contains_chinese(text):
 
 
 def find_chinese_font():
-    """Find a Chinese font file"""
-    font_paths = [
+    """Find a Chinese font file (compatible with Windows, Linux, and macOS)"""
+    system = platform.system()
+    font_paths = []
+    
+    # Windows 系统字体路径
+    if system == "Windows":
+        windows_font_dir = os.path.join(os.environ.get("WINDIR", "C:/Windows"), "Fonts")
+        font_paths.extend([
+            os.path.join(windows_font_dir, "simsun.ttc"),      # 宋体
+            os.path.join(windows_font_dir, "simhei.ttf"),      # 黑体
+            os.path.join(windows_font_dir, "msyh.ttc"),        # 微软雅黑
+            os.path.join(windows_font_dir, "msyhbd.ttc"),      # 微软雅黑 Bold
+            os.path.join(windows_font_dir, "simkai.ttf"),      # 楷体
+            os.path.join(windows_font_dir, "simli.ttf"),       # 隶书
+        ])
+    # Linux 系统字体路径
+    elif system == "Linux":
+        font_paths.extend([
+            "/opt/product/ml_backend/simsun.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+            "/usr/share/fonts/truetype/arphic/uming.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        ])
+    # macOS 系统字体路径
+    elif system == "Darwin":
+        font_paths.extend([
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "/System/Library/Fonts/STHeiti Medium.ttc",
+            "/Library/Fonts/Arial Unicode.ttf",
+        ])
+    
+    # 通用字体路径（跨平台）
+    font_paths.extend([
         "/opt/product/ml_backend/simsun.ttc",
         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
         "/usr/share/fonts/truetype/arphic/uming.ttc",
         "/System/Library/Fonts/PingFang.ttc",  # macOS
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    ]
+    ])
     
     for font_path in font_paths:
         if os.path.exists(font_path):
