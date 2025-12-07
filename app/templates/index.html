@@ -24,9 +24,9 @@
                     <p class="hint">支持 .pt, .pth, .ckpt 文件或包含模型文件的 .zip 压缩包（可上传多个）</p>
                     <input type="file" id="model-input" multiple accept=".pt,.pth,.ckpt,.zip">
                 </div>
-                <div style="margin: 15px 0; padding: 15px; background: #f5f5f5; border-radius: 8px;">
-                    <p style="margin: 0 0 10px 0; font-weight: 600; color: #666;">或通过本地路径导入：</p>
-                    <div style="display: flex; gap: 10px; align-items: center;">
+                <div style="margin: 10px 0; padding: 10px 12px; background: #f5f5f5; border-radius: 6px;">
+                    <p style="margin: 0 0 8px 0; font-weight: 600; color: #666; font-size: 13px;">或通过本地路径导入：</p>
+                    <div style="display: flex; gap: 8px; align-items: center;">
                         <input type="text" id="model-path-input" placeholder="输入模型路径，多个路径用分号(;)分割" 
                                style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                         <button id="model-path-btn" class="btn-secondary" style="padding: 8px 16px;">导入路径</button>
@@ -48,9 +48,9 @@
                     <p class="hint">支持 .jpg, .jpeg, .png, .bmp 文件或包含图片的 .zip 压缩包</p>
                     <input type="file" id="data-input" multiple accept=".jpg,.jpeg,.png,.bmp,.zip">
                 </div>
-                <div style="margin: 15px 0; padding: 15px; background: #f5f5f5; border-radius: 8px;">
-                    <p style="margin: 0 0 10px 0; font-weight: 600; color: #666;">或通过本地目录导入：</p>
-                    <div style="display: flex; gap: 10px; align-items: center;">
+                <div style="margin: 10px 0; padding: 10px 12px; background: #f5f5f5; border-radius: 6px;">
+                    <p style="margin: 0 0 8px 0; font-weight: 600; color: #666; font-size: 13px;">或通过本地目录导入：</p>
+                    <div style="display: flex; gap: 8px; align-items: center;">
                         <input type="text" id="data-path-input" placeholder="输入图片目录路径" 
                                style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                         <button id="data-path-btn" class="btn-secondary" style="padding: 8px 16px;">导入目录</button>
@@ -70,9 +70,9 @@
             </div>
 
             <div class="section" id="results-section" style="display: none;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <h2 style="margin: 0;">4. 预测结果</h2>
-                    <button id="clear-results-btn" class="btn-secondary" style="padding: 8px 16px;">清空结果</button>
+                    <button id="clear-results-btn" class="btn-secondary" style="padding: 6px 12px; font-size: 13px;">清空结果</button>
                 </div>
                 <div id="results-grid" class="results-grid"></div>
             </div>
