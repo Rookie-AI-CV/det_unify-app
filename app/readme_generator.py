@@ -174,7 +174,7 @@ def _generate_html(model_infos, label_colors, predictions, stats, total_images,
         '    <meta name="viewport" content="width=device-width, initial-scale=1.0">',
         result_id_meta,
         '    <title>DetUnify Studio - 预测结果报告</title>',
-        '    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>',
+        '',
         _get_styles(),
         '</head>',
         '<body>',
@@ -685,18 +685,6 @@ def _get_styles():
             background: #764ba2;
         }
         
-        .save-filtered-btn {
-            background: #28a745 !important;
-        }
-        
-        .save-filtered-btn:hover {
-            background: #218838 !important;
-        }
-        
-        .save-filtered-btn:disabled {
-            background: #95a5a6 !important;
-            cursor: not-allowed;
-        }
         
         .image-browser {
             background: white;
@@ -765,6 +753,8 @@ def _get_styles():
             align-items: center;
             justify-content: center;
             min-width: 0;
+            position: relative;
+            overflow: hidden;
         }
         
         .image-wrapper img {
@@ -772,6 +762,17 @@ def _get_styles():
             max-height: 70vh;
             object-fit: contain;
             border-radius: 4px;
+            transition: transform 0.1s;
+            transform-origin: center center;
+            cursor: grab;
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+        }
+        
+        .image-wrapper img:active {
+            cursor: grabbing;
         }
         
         .nav-btn {
@@ -814,6 +815,13 @@ def _get_styles():
             .browser-content-wrapper {
                 flex-direction: column;
             }
+            .image-info-sidebar {
+                width: 100%;
+                min-width: unset;
+                border-right: none;
+                border-bottom: 1px solid #e9ecef;
+                max-height: 200px;
+            }
             .bbox-list-sidebar {
                 width: 100%;
                 min-width: unset;
@@ -823,11 +831,6 @@ def _get_styles():
             }
         }
         
-        .browser-info {
-            padding: 16px 24px;
-            background: #f8f9fa;
-            border-top: 1px solid #e9ecef;
-        }
         
         .header-buttons {
             display: flex;
@@ -872,15 +875,60 @@ def _get_styles():
             height: 100vh;
             display: flex;
             flex-direction: column;
+            background: #1a1a1a;
+        }
+        
+        .image-browser.fullscreen-mode .browser-header {
+            position: relative;
+            z-index: 10000;
+            flex-shrink: 0;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+        }
+        
+        .image-browser.fullscreen-mode .image-name-header {
+            color: #000000;
+            font-weight: 600;
         }
         
         .image-browser.fullscreen-mode .browser-viewport {
             flex: 1;
             min-height: 0;
+            overflow: hidden;
+            padding: 0;
+            margin-top: 0;
+            background: #001f3f;
+        }
+        
+        .image-browser.fullscreen-mode .nav-btn {
+            display: none !important;
+        }
+        
+        .image-browser.fullscreen-mode .browser-content-wrapper {
+            height: calc(100vh - 80px); /* 减去导航栏高度 */
+            margin-top: 0;
+            padding-top: 0;
+        }
+        
+        .image-browser.fullscreen-mode .image-wrapper {
+            position: relative;
+            overflow: auto;
         }
         
         .image-browser.fullscreen-mode .image-wrapper img {
-            max-height: 100vh;
+            max-height: calc(100vh - 80px);
+            cursor: grab;
+            transition: transform 0.1s;
+        }
+        
+        .image-browser.fullscreen-mode .image-wrapper img:active {
+            cursor: grabbing;
+        }
+        
+        .image-browser.fullscreen-mode .image-info-sidebar,
+        .image-browser.fullscreen-mode .bbox-list-sidebar {
+            max-height: calc(100vh - 80px); /* 减去导航栏高度 */
+            overflow-y: auto;
         }
         
         .bbox-list-sidebar {
@@ -948,33 +996,6 @@ def _get_styles():
             flex-shrink: 0;
         }
         
-        .image-info-line {
-            font-size: 13px;
-            line-height: 1.6;
-            color: #495057;
-            white-space: nowrap;
-            overflow-x: auto;
-            overflow-y: hidden;
-            padding: 8px 0;
-        }
-        
-        .image-info-line::-webkit-scrollbar {
-            height: 6px;
-        }
-        
-        .image-info-line::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 3px;
-        }
-        
-        .image-info-line::-webkit-scrollbar-thumb {
-            background: #888;
-            border-radius: 3px;
-        }
-        
-        .image-info-line::-webkit-scrollbar-thumb:hover {
-            background: #555;
-        }
         
         .status-badge-inline {
             display: inline-block;
@@ -1352,7 +1373,6 @@ def _generate_images_section(images_with_info, false_positive_count, missed_coun
         '                            </div>',
         '                            <div class="filter-actions">',
         '                                <button onclick="resetFilters()">重置筛选</button>',
-        '                                <button id="save-filtered-btn" class="save-filtered-btn" onclick="saveFilteredImages()" title="保存当前筛选的图片">保存筛选图片</button>',
         '                            </div>',
         '                        </div>',
         '                        <div class="image-browser" id="image-browser">',
@@ -1367,15 +1387,13 @@ def _generate_images_section(images_with_info, false_positive_count, missed_coun
         '                            <div class="browser-viewport">',
         '                                <button class="nav-btn prev-btn" onclick="navigateImage(-1)" title="上一张 (← 或 A)">‹</button>',
         '                                <div class="browser-content-wrapper">',
+        '                                    <div id="image-info-sidebar" class="image-info-sidebar"></div>',
         '                                    <div class="image-wrapper">',
         '                                        <img id="browser-image" src="" alt="" />',
         '                                    </div>',
         '                                    <div id="bbox-list" class="bbox-list-sidebar"></div>',
         '                                </div>',
         '                                <button class="nav-btn next-btn" onclick="navigateImage(1)" title="下一张 (→ 或 D)">›</button>',
-        '                            </div>',
-        '                            <div class="browser-info">',
-        '                                <div id="image-info-line" class="image-info-line"></div>',
         '                            </div>',
         '                        </div>',
         '                    </div>',
@@ -1391,7 +1409,7 @@ def _generate_images_section(images_with_info, false_positive_count, missed_coun
         '                            document.getElementById("browser-image").src = "";',
         '                            document.getElementById("current-image-info").textContent = "0 / 0";',
         '                            document.getElementById("current-image-name").textContent = "无图片";',
-        '                            document.getElementById("image-info-line").innerHTML = "";',
+        '                            document.getElementById("image-info-sidebar").innerHTML = "";',
         '                            document.getElementById("bbox-list").innerHTML = "";',
         '                            return;',
         '                        }',
@@ -1400,9 +1418,17 @@ def _generate_images_section(images_with_info, false_positive_count, missed_coun
         '                        // 根据切换状态选择图片路径',
         '                        const imgSrc = showOriginal && img.original_src ? encodeURI(img.original_src) : encodeURI(img.src);',
         '                        ',
-        '                        document.getElementById("browser-image").src = imgSrc;',
+        '                        const browserImage = document.getElementById("browser-image");',
+        '                        browserImage.src = imgSrc;',
         '                        document.getElementById("current-image-info").textContent = `${currentIndex + 1} / ${filteredImages.length}`;',
         '                        document.getElementById("current-image-name").textContent = img.name;',
+        '                        ',
+        '                        // 图片加载完成后重置缩放和位置',
+        '                        browserImage.onload = function() {',
+        '                            if (typeof resetImagePosition === "function") {',
+        '                                resetImagePosition();',
+        '                            }',
+        '                        };',
         '                        ',
         '                        // 更新切换按钮',
         '                        const toggleBtn = document.getElementById("toggle-image-btn");',
@@ -1411,7 +1437,7 @@ def _generate_images_section(images_with_info, false_positive_count, missed_coun
         '                        }',
         '                        ',
         '                        // 更新信息行（单行显示所有信息）',
-        '                        const infoLineDiv = document.getElementById("image-info-line");',
+        '                        const infoLineDiv = document.getElementById("image-info-sidebar");',
         '                        const statuses = img.statuses || [];',
         '                        let infoParts = [];',
         '                        ',
@@ -1444,28 +1470,23 @@ def _generate_images_section(images_with_info, false_positive_count, missed_coun
         '                        // 备注',
         '                        const notesText = img.notes ? escapeHtml(img.notes) : \'<span style="color: #999; font-style: italic;">无备注</span>\';',
         '                        ',
-        '                        // 最大置信度',
-        '                        const maxScoreText = img.max_score > 0 ? `${(img.max_score * 100).toFixed(1)}%` : \'0%\';',
+        '                        // 组装信息（垂直布局，移除最大置信度和标签）',
+        '                        let infoHtml = [];',
         '                        ',
-        '                        // 标签',
-        '                        const labelsText = img.labels && img.labels.length > 0 ? img.labels.join(", ") : \'\';',
+        '                        // 状态',
+        '                        if (infoParts.length > 0) {',
+        '                            infoHtml.push(\'<div style="margin-bottom: 8px;">\' + infoParts.join(\' \') + \'</div>\');',
+        '                        }',
         '                        ',
-        '                        // 组装完整信息行',
-        '                        let infoLineHtml = infoParts.join(\' \');',
-        '                        ',
+        '                        // 类别标签信息',
         '                        if (labelsInfo.length > 0) {',
-        '                            infoLineHtml += \' | \' + labelsInfo.join(\' | \');',
+        '                            infoHtml.push(\'<div style="margin-bottom: 8px;">\' + labelsInfo.join(\'<br>\') + \'</div>\');',
         '                        }',
         '                        ',
-        '                        infoLineHtml += \' | \' + notesText;',
+        '                        // 备注',
+        '                        infoHtml.push(\'<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e9ecef;">\' + notesText + \'</div>\');',
         '                        ',
-        '                        infoLineHtml += ` | <strong>最大置信度:</strong> ${maxScoreText}`;',
-        '                        ',
-        '                        if (labelsText) {',
-        '                            infoLineHtml += ` | <strong>标签:</strong> ${labelsText}`;',
-        '                        }',
-        '                        ',
-        '                        infoLineDiv.innerHTML = infoLineHtml;',
+        '                        infoLineDiv.innerHTML = infoHtml.join(\'\');',
         '                        ',
         '                        // 更新检测框信息列表',
         '                        updateBboxList(img);',
@@ -1526,12 +1547,16 @@ def _generate_images_section(images_with_info, false_positive_count, missed_coun
         '                            document.body.style.overflow = "";',
         '                            const btn = document.getElementById("fullscreen-btn");',
         '                            if (btn) btn.textContent = "全屏";',
+        '                            // 退出全屏时重置缩放和位置',
+        '                            resetImagePosition();',
         '                        } else {',
         '                            // 进入全屏',
         '                            browser.classList.add("fullscreen-mode");',
         '                            document.body.style.overflow = "hidden";',
         '                            const btn = document.getElementById("fullscreen-btn");',
         '                            if (btn) btn.textContent = "退出全屏";',
+        '                            // 进入全屏时重置缩放和位置',
+        '                            resetImagePosition();',
         '                        }',
         '                    }',
         '',
@@ -1540,6 +1565,10 @@ def _generate_images_section(images_with_info, false_positive_count, missed_coun
         '                        currentIndex += direction;',
         '                        if (currentIndex < 0) currentIndex = filteredImages.length - 1;',
         '                        if (currentIndex >= filteredImages.length) currentIndex = 0;',
+        '                        // 切换图片时重置缩放和位置',
+        '                        if (typeof resetImagePosition === "function") {',
+        '                            resetImagePosition();',
+        '                        }',
         '                        updateBrowser();',
         '                    }',
         '',
@@ -1585,202 +1614,117 @@ def _generate_images_section(images_with_info, false_positive_count, missed_coun
         '                        return div.innerHTML;',
         '                    }',
         '                    ',
-        '                    function generateDirectoryName() {',
-        '                        // 基于当前筛选条件生成目录名称',
-        '                        const statusFilters = Array.from(document.querySelectorAll("#browser-filters input[type=\'checkbox\']:checked")).map(cb => cb.value);',
-        '                        const labelFilters = Array.from(document.getElementById("filter-label").selectedOptions).map(opt => opt.value).filter(v => v);',
-        '                        ',
-        '                        const statusNames = {',
-        '                            "false_positive": "误检",',
-        '                            "missed": "漏检",',
-        '                            "low_confidence": "低置信度",',
-        '                            "normal": "正常"',
-        '                        };',
-        '                        ',
-        '                        // 收集选中的状态名称（排除normal）',
-        '                        const selectedStatuses = statusFilters',
-        '                            .filter(s => s !== "normal")',
-        '                            .map(s => statusNames[s] || s)',
-        '                            .sort();',
-        '                        ',
-        '                        let dirName = "";',
-        '                        ',
-        '                        if (selectedStatuses.length > 0) {',
-        '                            dirName = selectedStatuses.join("&");',
-        '                        } else if (statusFilters.includes("normal")) {',
-        '                            dirName = "正常";',
-        '                        } else {',
-        '                            dirName = "筛选图片";',
-        '                        }',
-        '                        ',
-        '                        // 如果有标签筛选，添加到目录名称',
-        '                        if (labelFilters.length > 0) {',
-        '                            const labelStr = labelFilters.sort().join("&");',
-        '                            dirName += "(" + labelStr + ")";',
-        '                        }',
-        '                        ',
-        '                        return dirName || "筛选图片";',
-        '                    }',
-        '                    ',
-        '                    async function saveFilteredImages() {',
-        '                        const btn = document.getElementById("save-filtered-btn");',
-        '                        if (!btn || filteredImages.length === 0) {',
-        '                            alert("没有可保存的图片");',
-        '                            return;',
-        '                        }',
-        '                        ',
-        '                        btn.disabled = true;',
-        '                        btn.textContent = "保存中...";',
-        '                        ',
-        '                        try {',
-        '                            const zip = new JSZip();',
-        '                            const dirName = generateDirectoryName();',
-        '                            ',
-        '                            // 创建原图和标注图目录',
-        '                            const originalDir = zip.folder(dirName + "/原图");',
-        '                            const annotatedDir = zip.folder(dirName + "/标注图");',
-        '                            ',
-        '                            let processedCount = 0;',
-        '                            let failedCount = 0;',
-        '                            const totalCount = filteredImages.length;',
-        '                            ',
-                            '                            // 辅助函数：从图片URL获取blob，支持相对路径（使用Canvas）',
-                            '                            async function loadImageAndGetBlob(imageUrl, imageName) {',
-                            '                                return new Promise((resolve, reject) => {',
-                            '                                    const img = new Image();',
-                            '                                    let timeout = null;',
-                            '                                    ',
-                            '                                    timeout = setTimeout(() => {',
-                            '                                        img.onload = null;',
-                            '                                        img.onerror = null;',
-                            '                                        reject(new Error("图片加载超时: " + imageUrl));',
-                            '                                    }, 10000); // 10秒超时',
-                            '                                    ',
-                            '                                    img.onload = function() {',
-                            '                                        if (timeout) clearTimeout(timeout);',
-                            '                                        try {',
-                            '                                            const canvas = document.createElement("canvas");',
-                            '                                            canvas.width = img.naturalWidth || img.width;',
-                            '                                            canvas.height = img.naturalHeight || img.height;',
-                            '                                            const ctx = canvas.getContext("2d");',
-                            '                                            ctx.drawImage(img, 0, 0);',
-                            '                                            ',
-                            '                                            const urlLower = imageUrl.toLowerCase();',
-                            '                                            const isPng = urlLower.endsWith(".png");',
-                            '                                            const mimeType = isPng ? "image/png" : "image/jpeg";',
-                            '                                            ',
-                            '                                            canvas.toBlob(function(blob) {',
-                            '                                                if (blob && blob.size > 0) {',
-                            '                                                    resolve(blob);',
-                            '                                                } else {',
-                            '                                                    reject(new Error("Canvas转换失败: " + imageName));',
-                            '                                                }',
-                            '                                            }, mimeType, isPng ? undefined : 0.95);',
-                            '                                        } catch (error) {',
-                            '                                            reject(new Error("Canvas处理失败: " + imageName + " - " + error.message));',
-                            '                                        }',
-                            '                                    };',
-                            '                                    ',
-                            '                                    img.onerror = function() {',
-                            '                                        if (timeout) clearTimeout(timeout);',
-                            '                                        reject(new Error("图片加载失败: " + imageUrl));',
-                            '                                    };',
-                            '                                    ',
-                            '                                    img.src = imageUrl;',
-                            '                                });',
-                            '                            }',
-                            '                            ',
-                            '                            // 处理每张图片',
-                            '                            for (const imgData of filteredImages) {',
-                            '                                try {',
-                            '                                    let originalProcessed = false;',
-                            '                                    let annotatedProcessed = false;',
-                            '                                    ',
-                            '                                    // 下载原图',
-                            '                                    if (imgData.original_src) {',
-                            '                                        try {',
-                            '                                            const originalUrl = imgData.original_src;',
-                            '                                            const originalBlob = await loadImageAndGetBlob(originalUrl, imgData.name);',
-                            '                                            if (originalBlob && originalBlob.size > 0) {',
-                            '                                                originalDir.file(imgData.name, originalBlob);',
-                            '                                                originalProcessed = true;',
-                            '                                            }',
-                            '                                        } catch (error) {',
-                            '                                            console.error(`原图下载失败 ${imgData.name}:`, error.message);',
-                            '                                        }',
-                            '                                    }',
-                            '                                    ',
-                            '                                    // 下载标注图',
-                            '                                    if (imgData.src) {',
-                            '                                        try {',
-                            '                                            const annotatedUrl = imgData.src;',
-                            '                                            const annotatedBlob = await loadImageAndGetBlob(annotatedUrl, imgData.name);',
-                            '                                            if (annotatedBlob && annotatedBlob.size > 0) {',
-                            '                                                annotatedDir.file(imgData.name, annotatedBlob);',
-                            '                                                annotatedProcessed = true;',
-                            '                                            }',
-                            '                                        } catch (error) {',
-                            '                                            console.error(`标注图下载失败 ${imgData.name}:`, error.message);',
-                            '                                        }',
-                            '                                    }',
-                            '                                    ',
-                            '                                    if (originalProcessed || annotatedProcessed) {',
-                            '                                        processedCount++;',
-                            '                                    } else {',
-                            '                                        failedCount++;',
-                            '                                        console.error(`图片处理失败: ${imgData.name}, 原图=${imgData.original_src}, 标注图=${imgData.src}`);',
-                            '                                    }',
-                            '                                    ',
-                            '                                    btn.textContent = `保存中... ${processedCount}/${totalCount}`;',
-                            '                                } catch (error) {',
-                            '                                    console.error(`处理图片异常 ${imgData.name}:`, error);',
-                            '                                    failedCount++;',
-                            '                                }',
-                            '                            }',
-        '                            ',
-        '                            // 生成并下载ZIP',
-        '                            const zipBlob = await zip.generateAsync({ type: "blob" });',
-        '                            const url = window.URL.createObjectURL(zipBlob);',
-        '                            const a = document.createElement("a");',
-        '                            a.href = url;',
-        '                            a.download = dirName + ".zip";',
-        '                            document.body.appendChild(a);',
-        '                            a.click();',
-        '                            window.URL.revokeObjectURL(url);',
-        '                            document.body.removeChild(a);',
-        '                            ',
-        '                            btn.disabled = false;',
-        '                            btn.textContent = "保存筛选图片";',
-        '                            if (failedCount > 0) {',
-        '                                alert(`保存完成: 成功 ${processedCount} 张，失败 ${failedCount} 张。文件: ${dirName}.zip`);',
-        '                            } else {',
-        '                                alert(`成功保存 ${processedCount} 张图片到 ${dirName}.zip`);',
-        '                            }',
-        '                        } catch (error) {',
-        '                            console.error("Error saving filtered images:", error);',
-        '                            alert("保存失败: " + error.message);',
-        '                            btn.disabled = false;',
-        '                            btn.textContent = "保存筛选图片";',
-        '                        }',
-        '                    }',
-        '',
+        '                    // 筛选导出功能已移除',
         '                    // 绑定筛选事件',
         '                    document.addEventListener("DOMContentLoaded", function() {',
         '                        document.querySelectorAll("#browser-filters input, #browser-filters select").forEach(el => {',
         '                            el.addEventListener("change", applyFilters);',
         '                        });',
         '                        ',
-        '                        // 键盘导航',
+        '                        // 图片拖动和缩放相关变量',
+        '                        let zoomLevel = 1;',
+        '                        let isDragging = false;',
+        '                        let dragStart = { x: 0, y: 0 };',
+        '                        let imageOffset = { x: 0, y: 0 };',
+        '                        ',
+        '                        // 重置图片位置和缩放',
+        '                        function resetImagePosition() {',
+        '                            zoomLevel = 1;',
+        '                            imageOffset.x = 0;',
+        '                            imageOffset.y = 0;',
+        '                            updateImageTransform();',
+        '                        }',
+        '                        ',
+        '                        // 更新图片变换',
+        '                        function updateImageTransform() {',
+        '                            const img = document.getElementById("browser-image");',
+        '                            if (img) {',
+        '                                img.style.transform = `translate(${imageOffset.x}px, ${imageOffset.y}px) scale(${zoomLevel})`;',
+        '                            }',
+        '                        }',
+        '                        ',
+        '                        // 图片拖动功能',
+        '                        const browserImage = document.getElementById("browser-image");',
+        '                        const imageWrapper = document.querySelector(".image-wrapper");',
+        '                        ',
+        '                        if (browserImage) {',
+        '                            browserImage.addEventListener("mousedown", function(e) {',
+        '                                if (e.button === 0) { // 左键',
+        '                                    isDragging = true;',
+        '                                    dragStart.x = e.clientX - imageOffset.x;',
+        '                                    dragStart.y = e.clientY - imageOffset.y;',
+        '                                    browserImage.style.cursor = "grabbing";',
+        '                                    browserImage.style.transition = "none";',
+        '                                    e.preventDefault();',
+        '                                }',
+        '                            });',
+        '                        }',
+        '                        ',
+        '                        document.addEventListener("mousemove", function(e) {',
+        '                            if (isDragging) {',
+        '                                imageOffset.x = e.clientX - dragStart.x;',
+        '                                imageOffset.y = e.clientY - dragStart.y;',
+        '                                updateImageTransform();',
+        '                                e.preventDefault();',
+        '                            }',
+        '                        });',
+        '                        ',
+        '                        document.addEventListener("mouseup", function(e) {',
+        '                            if (e.button === 0 && isDragging) {',
+        '                                isDragging = false;',
+        '                                const img = document.getElementById("browser-image");',
+        '                                if (img) {',
+        '                                    img.style.cursor = "grab";',
+        '                                    img.style.transition = "transform 0.1s";',
+        '                                }',
+        '                            }',
+        '                        });',
+        '                        ',
+        '                        // 鼠标滚轮缩放',
+        '                        if (imageWrapper) {',
+        '                            imageWrapper.addEventListener("wheel", function(e) {',
+        '                                if (e.ctrlKey || e.metaKey) {',
+        '                                    e.preventDefault();',
+        '                                    const delta = e.deltaY > 0 ? -0.1 : 0.1;',
+        '                                    zoomLevel = Math.max(0.5, Math.min(5, zoomLevel + delta));',
+        '                                    updateImageTransform();',
+        '                                }',
+        '                            });',
+        '                        }',
+        '                        ',
+        '                        // 键盘导航（全屏模式下仍可使用键盘切换）',
         '                        document.addEventListener("keydown", function(e) {',
         '                            if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;',
         '                            ',
+        '                            const browser = document.querySelector(".image-browser");',
+        '                            const isFullscreen = browser && browser.classList.contains("fullscreen-mode");',
+        '                            ',
+        '                            // 左右切换（全屏和非全屏模式下都支持）',
         '                            if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {',
         '                                e.preventDefault();',
         '                                navigateImage(-1);',
         '                            } else if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {',
         '                                e.preventDefault();',
         '                                navigateImage(1);',
-        '                            } else if (e.key === "t" || e.key === "T") {',
+        '                            }',
+        '                            ',
+        '                            // 全屏模式下支持缩放',
+        '                            if (isFullscreen) {',
+        '                                if (e.key === "+" || e.key === "=") {',
+        '                                    e.preventDefault();',
+        '                                    zoomLevel = Math.min(zoomLevel + 0.2, 5);',
+        '                                    updateImageTransform();',
+        '                                } else if (e.key === "-") {',
+        '                                    e.preventDefault();',
+        '                                    zoomLevel = Math.max(zoomLevel - 0.2, 0.5);',
+        '                                    updateImageTransform();',
+        '                                } else if (e.key === "0") {',
+        '                                    e.preventDefault();',
+        '                                    resetImagePosition();',
+        '                                }',
+        '                            }',
+        '                            ',
+        '                            if (e.key === "t" || e.key === "T") {',
         '                                e.preventDefault();',
         '                                toggleImageType();',
         '                            } else if (e.key === "f" || e.key === "F") {',

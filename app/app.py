@@ -1268,11 +1268,171 @@ def _export_results_with_progress(result_id, description, export_originals, expo
                         progress_callback('正在打包原图文件...', f'已处理 {idx + 1}/{total_originals} 张原图', progress)
         
         if progress_callback:
+            progress_callback('正在生成分类信息...', '正在生成误检/漏检/低置信度分类JSON', 82)
+        
+        # 4. Generate classification JSON file
+        predictions = results_data.get('predictions', {})
+        classification_data = {
+            'false_positive': [],  # 误检图片列表，每个包含filename和labels
+            'missed': [],  # 漏检图片列表，每个包含filename和labels
+            'low_confidence': []  # 低置信度图片列表，每个包含filename和labels
+        }
+        
+        for img_name, img_data in predictions.items():
+            # 支持新的多状态格式（statuses数组）或旧的单一状态格式（向后兼容）
+            statuses = img_data.get('statuses', [])
+            if not statuses:
+                old_status = img_data.get('status')
+                if old_status:
+                    statuses = [old_status]
+            
+            # 收集误检信息
+            if 'false_positive' in statuses:
+                false_positive_labels = img_data.get('false_positive_labels', [])
+                classification_data['false_positive'].append({
+                    'filename': img_name,
+                    'labels': false_positive_labels
+                })
+            
+            # 收集漏检信息
+            if 'missed' in statuses:
+                missed_labels = img_data.get('missed_labels', [])
+                classification_data['missed'].append({
+                    'filename': img_name,
+                    'labels': missed_labels
+                })
+            
+            # 收集低置信度信息
+            if 'low_confidence' in statuses:
+                low_confidence_labels = img_data.get('low_confidence_labels', [])
+                classification_data['low_confidence'].append({
+                    'filename': img_name,
+                    'labels': low_confidence_labels
+                })
+        
+        # 写入分类JSON文件
+        classification_json = json.dumps(classification_data, ensure_ascii=False, indent=2)
+        zip_file.writestr('classification.json', classification_json.encode('utf-8'))
+        
+        if progress_callback:
             progress_callback('正在生成报告...', '正在生成README.html报告文件', 85)
         
-        # 4. Generate and add README file
+        # 5. Generate and add README file
         readme_content = generate_readme(results_data, model_dirs, model_names_map, description=description, result_id=result_id)
         zip_file.writestr('README.html', readme_content.encode('utf-8'))
+        
+        if progress_callback:
+            progress_callback('正在添加拆分脚本...', '正在添加Python拆分脚本', 90)
+        
+        # 6. Add Python script for splitting images
+        split_script = '''#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+图片分类拆分脚本
+根据classification.json文件，将标注图和原图分别拆分到误检、漏检、低置信度目录
+"""
+import json
+import shutil
+from pathlib import Path
+
+def main():
+    # 获取脚本所在目录（导出根目录）
+    script_dir = Path(__file__).parent.absolute()
+    
+    # 读取分类信息
+    classification_file = script_dir / 'classification.json'
+    if not classification_file.exists():
+        print(f"错误: 找不到分类文件 {classification_file}")
+        input("按回车键退出...")
+        return
+    
+    with open(classification_file, 'r', encoding='utf-8') as f:
+        classification_data = json.load(f)
+    
+    # 定义源目录和目标目录
+    annotated_dir = script_dir / '标注图'
+    original_dir = script_dir / '原图'
+    
+    output_dirs = {
+        'false_positive': {
+            'annotated': script_dir / '误检' / '标注图',
+            'original': script_dir / '误检' / '原图'
+        },
+        'missed': {
+            'annotated': script_dir / '漏检' / '标注图',
+            'original': script_dir / '漏检' / '原图'
+        },
+        'low_confidence': {
+            'annotated': script_dir / '低置信度' / '标注图',
+            'original': script_dir / '低置信度' / '原图'
+        }
+    }
+    
+    # 创建输出目录
+    for category, dirs in output_dirs.items():
+        dirs['annotated'].mkdir(parents=True, exist_ok=True)
+        dirs['original'].mkdir(parents=True, exist_ok=True)
+    
+    # 统计信息
+    stats = {
+        'false_positive': {'annotated': 0, 'original': 0},
+        'missed': {'annotated': 0, 'original': 0},
+        'low_confidence': {'annotated': 0, 'original': 0}
+    }
+    
+    # 处理每个分类
+    for category, images in classification_data.items():
+        if category not in output_dirs:
+            continue
+        
+        print(f"\\n处理 {category} 图片...")
+        target_dirs = output_dirs[category]
+        
+        for img_info in images:
+            filename = img_info['filename']
+            labels = img_info.get('labels', [])
+            
+            # 复制标注图
+            annotated_src = annotated_dir / filename
+            if annotated_src.exists():
+                annotated_dst = target_dirs['annotated'] / filename
+                shutil.copy2(annotated_src, annotated_dst)
+                stats[category]['annotated'] += 1
+                print(f"  已复制标注图: {filename} (标签: {', '.join(labels) if labels else '无'})")
+            else:
+                print(f"  警告: 找不到标注图 {filename}")
+            
+            # 复制原图
+            original_src = original_dir / filename
+            if original_src.exists():
+                original_dst = target_dirs['original'] / filename
+                shutil.copy2(original_src, original_dst)
+                stats[category]['original'] += 1
+            else:
+                print(f"  警告: 找不到原图 {filename}")
+    
+    # 打印统计信息
+    print("\\n" + "="*50)
+    print("拆分完成！统计信息：")
+    print("="*50)
+    for category, count in stats.items():
+        category_name = {'false_positive': '误检', 'missed': '漏检', 'low_confidence': '低置信度'}.get(category, category)
+        print(f"{category_name}:")
+        print(f"  标注图: {count['annotated']} 张")
+        print(f"  原图: {count['original']} 张")
+        print()
+    
+    print("所有图片已拆分到对应目录：")
+    print("  - 误检/标注图/ 和 误检/原图/")
+    print("  - 漏检/标注图/ 和 漏检/原图/")
+    print("  - 低置信度/标注图/ 和 低置信度/原图/")
+    print("\\n按回车键退出...")
+    input()
+
+if __name__ == '__main__':
+    main()
+'''
+        zip_file.writestr('split_images.pyw', split_script.encode('utf-8'))
         
         if progress_callback:
             progress_callback('正在完成打包...', '正在完成ZIP文件压缩', 95)
