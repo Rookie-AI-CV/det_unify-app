@@ -13,21 +13,20 @@ body {
 .container {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 15px;
+    padding: 20px;
 }
 
 header {
     background: white;
-    padding: 12px 16px;
-    border-radius: 6px;
-    margin-bottom: 12px;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 header h1 {
-    margin-bottom: 10px;
+    margin-bottom: 15px;
     color: #2c3e50;
-    font-size: 24px;
 }
 
 .tabs {
@@ -60,23 +59,22 @@ header h1 {
 
 .section {
     background: white;
-    padding: 12px 16px;
-    border-radius: 6px;
-    margin-bottom: 12px;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .section h2 {
-    margin-bottom: 10px;
+    margin-bottom: 15px;
     color: #2c3e50;
-    font-size: 16px;
-    font-weight: 600;
+    font-size: 18px;
 }
 
 .upload-area {
     border: 2px dashed #3498db;
-    border-radius: 6px;
-    padding: 24px 16px;
+    border-radius: 8px;
+    padding: 40px;
     text-align: center;
     cursor: pointer;
     transition: all 0.3s;
@@ -105,21 +103,20 @@ header h1 {
 }
 
 .upload-area p {
-    margin: 3px 0;
+    margin: 5px 0;
     color: #666;
-    font-size: 14px;
 }
 
 .upload-area .hint {
-    font-size: 11px;
+    font-size: 12px;
     color: #999;
 }
 
 .file-list {
-    margin-top: 10px;
+    margin-top: 15px;
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 10px;
 }
 
 .file-item {
@@ -136,88 +133,6 @@ header h1 {
     cursor: pointer;
     color: #e74c3c;
     font-weight: bold;
-}
-
-.model-item {
-    background: #f8f9fa;
-    border: 1px solid #e0e0e0;
-    border-radius: 6px;
-    padding: 10px;
-    margin-bottom: 8px;
-}
-
-.model-item-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-    flex-wrap: wrap;
-}
-
-.model-name {
-    font-weight: 600;
-    color: #2c3e50;
-    font-size: 14px;
-}
-
-.model-type {
-    color: #7f8c8d;
-    font-size: 12px;
-}
-
-.remove-model-btn {
-    margin-left: auto;
-    background: #e74c3c;
-    color: white;
-    border: none;
-    border-radius: 50%;
-    width: 24px;
-    height: 24px;
-    cursor: pointer;
-    font-size: 18px;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.3s;
-}
-
-.remove-model-btn:hover {
-    background: #c0392b;
-}
-
-.model-item-config {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.config-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-}
-
-.config-row label {
-    min-width: 90px;
-    font-weight: 500;
-    color: #555;
-    font-size: 12px;
-}
-
-.model-threshold-slider {
-    flex: 1;
-    max-width: 150px;
-}
-
-.model-threshold-input,
-.model-maxsize-input {
-    width: 70px;
-    padding: 4px 6px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    font-size: 12px;
 }
 
 .params {
@@ -253,9 +168,9 @@ header h1 {
     background: #27ae60;
     color: white;
     border: none;
-    padding: 10px 24px;
+    padding: 12px 30px;
     border-radius: 6px;
-    font-size: 15px;
+    font-size: 16px;
     cursor: pointer;
     transition: all 0.3s;
 }
@@ -286,9 +201,9 @@ header h1 {
 
 .results-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 12px;
-    margin-top: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
 }
 
 .result-item {
@@ -306,13 +221,13 @@ header h1 {
 
 .result-item img {
     width: 100%;
-    height: 160px;
+    height: 200px;
     object-fit: cover;
 }
 
 .result-item .info {
-    padding: 8px;
-    font-size: 11px;
+    padding: 10px;
+    font-size: 12px;
     color: #666;
 }
 
@@ -438,10 +353,10 @@ header h1 {
 }
 
 .progress-container {
-    margin-top: 10px;
+    margin-top: 15px;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 15px;
 }
 
 .progress-bar {

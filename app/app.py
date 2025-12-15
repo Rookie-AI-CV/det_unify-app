@@ -869,9 +869,10 @@ def predict():
                             'bboxes': bboxes
                         })
             
+            # Draw predictions (only bounding boxes, no text on image) or save original image
+            vis_img = img.copy()
             if img_predictions:
-                # Draw predictions (only bounding boxes, no text on image)
-                vis_img = img.copy()
+                # Draw bounding boxes if there are predictions
                 for pred_group in img_predictions:
                     line_style = pred_group['line_style']
                     for bbox_info in pred_group['bboxes']:
@@ -881,19 +882,21 @@ def predict():
                         color_bgr = (color_rgb[2], color_rgb[1], color_rgb[0])
                         x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
                         draw_rectangle_with_style(vis_img, (x1, y1), (x2, y2), color_bgr, 2, style=line_style)
-                
-                output_path = result_dir / img_name
-                cv2.imwrite(str(output_path), vis_img)
-                
-                predictions[img_name] = {
-                    'image': f'/static/results/{result_id}/{img_name}',
-                    'predictions': img_predictions,
-                    'notes': '',  # Initialize notes field
-                    'statuses': [],  # Initialize statuses field (list of 'false_positive', 'missed', 'low_confidence')
-                    'false_positive_labels': [],  # Initialize false positive labels (list of label names for false positive bboxes)
-                    'missed_labels': [],  # Initialize missed labels (list of label names for missed detections)
-                    'low_confidence_labels': []  # Initialize low confidence labels (list of label names for low confidence detections)
-                }
+            
+            # Save image (with or without predictions)
+            output_path = result_dir / img_name
+            cv2.imwrite(str(output_path), vis_img)
+            
+            # Always add image to predictions, even if no predictions were made
+            predictions[img_name] = {
+                'image': f'/static/results/{result_id}/{img_name}',
+                'predictions': img_predictions,  # Empty list if no predictions
+                'notes': '',  # Initialize notes field
+                'statuses': [],  # Initialize statuses field (list of 'false_positive', 'missed', 'low_confidence')
+                'false_positive_labels': [],  # Initialize false positive labels (list of label names for false positive bboxes)
+                'missed_labels': [],  # Initialize missed labels (list of label names for missed detections)
+                'low_confidence_labels': []  # Initialize low confidence labels (list of label names for low confidence detections)
+            }
         
         if not predictions:
             return jsonify({'error': 'No predictions generated'}), 400

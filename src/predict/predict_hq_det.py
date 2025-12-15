@@ -393,6 +393,9 @@ def main():
         if img is None:
             logger.warning(f"无法读取图片: {img_path}")
             continue
+
+        import numpy as np
+        img = np.ascontiguousarray(img, dtype=np.uint8)
         
         try:
             if hasattr(model, 'predict'):
@@ -408,8 +411,10 @@ def main():
                 if 'max_size' in params or 'imgsz' in params:
                     predict_kwargs['max_size' if 'max_size' in params else 'imgsz'] = args.max_size
                 
+                # 部分 HQ-Det 模型（如 HQRTDETR）要求传入「列表形式的多张图片」。
+                # 统一包装为长度为 1 的列表，避免逐行被当成单张图片导致类型检查报错。
                 predict_results = model.predict([img], **predict_kwargs)
-                result = predict_results[0] if isinstance(predict_results, list) else predict_results
+                result = predict_results[0] if isinstance(predict_results, (list, tuple)) else predict_results
             else:
                 logger.error("模型没有 predict 方法，无法进行预测")
                 sys.exit(1)

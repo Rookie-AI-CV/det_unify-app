@@ -477,9 +477,8 @@ function displayResults(data) {
 function openImageViewer(imgName) {
     if (!currentResults || !currentResults.result_id) return;
     
-    // Open viewer page in a new tab
-    const viewerUrl = `/viewer/${currentResults.result_id}`;
-    window.open(viewerUrl, '_blank');
+    // Navigate to viewer page
+    window.location.href = `/viewer/${currentResults.result_id}`;
 }
 
 function clearResults() {
