@@ -507,6 +507,8 @@
             const missedLabels = pred.missed_labels || [];
             const lowConfidenceLabels = pred.low_confidence_labels || [];
             
+            const notesValue = notesTextarea.value.trim();
+            
             fetch(`/api/results/${resultId}/notes`, {
                 method: 'POST',
                 headers: {
@@ -514,12 +516,24 @@
                 },
                 body: JSON.stringify({
                     image: imgName,
-                    notes: notesTextarea.value.trim(),
+                    notes: notesValue,
                     statuses: statuses,
                     false_positive_labels: falsePositiveLabels,
                     missed_labels: missedLabels,
                     low_confidence_labels: lowConfidenceLabels
                 })
+            }).then(response => {
+                if (response.ok) {
+                    // 保存成功后，更新本地数据，确保切换图片后备注能正确显示
+                    pred.notes = notesValue;
+                    pred.statuses = statuses;
+                    pred.false_positive_labels = falsePositiveLabels;
+                    pred.missed_labels = missedLabels;
+                    pred.low_confidence_labels = lowConfidenceLabels;
+                    // 向后兼容：更新旧的status字段
+                    pred.status = statuses.length > 0 ? statuses[0] : null;
+                }
+                return response.json();
             }).catch(error => {
                 console.error('Error saving statuses:', error);
             });
@@ -922,7 +936,14 @@
             
             // 对于漏检（missed），从所有类别标签中获取（因为漏检是指应该检测到但没检测到的）
             if (statusType === 'missed') {
-                if (currentData && currentData.label_colors) {
+                // 优先使用 all_class_names（完整的类别列表），如果没有则使用 label_colors
+                if (currentData && currentData.all_class_names && currentData.all_class_names.length > 0) {
+                    currentData.all_class_names.forEach(label => {
+                        if (label && label.trim()) {
+                            allLabels.add(label.trim());
+                        }
+                    });
+                } else if (currentData && currentData.label_colors) {
                     Object.keys(currentData.label_colors).forEach(label => {
                         allLabels.add(label);
                     });

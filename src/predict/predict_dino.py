@@ -395,12 +395,36 @@ def main():
         predictor = DET02Predictor(model_info)
         predictor.load_model()
     
+    # 从模型中获取所有类别名称（优先使用）
+    all_class_names_from_model = None
+    try:
+        if hasattr(predictor, 'infer') and hasattr(predictor.infer, 'id2name'):
+            id2name = predictor.infer.id2name
+            if isinstance(id2name, dict) and id2name:
+                # 将 id2name 字典转换为按 ID 排序的类别名称列表
+                max_id = max(id2name.keys())
+                class_names_list = [''] * (max_id + 1)
+                for class_id, class_name in id2name.items():
+                    class_names_list[class_id] = class_name
+                # 过滤掉空字符串
+                all_class_names_from_model = [name for name in class_names_list if name and name.strip()]
+                logger.info(f"从模型获取类别列表: {len(all_class_names_from_model)} 个类别")
+    except Exception as e:
+        logger.warning(f"无法从模型获取类别列表: {e}")
+    
     # Predict
     results = []
+    all_detected_classes = set()  # 收集所有出现的类别名称（作为备用）
+    
     if len(images) == 1:
         result = predictor.predict(images[0], args.threshold)
         result.image_data = images[0]  # 使用image_data字段存储图片路径
         results.append(result)
+        # 收集类别名称
+        if hasattr(result, 'predictions') and result.predictions:
+            for pred in result.predictions:
+                if hasattr(pred, 'name') and pred.name:
+                    all_detected_classes.add(pred.name)
     else:
         from tqdm import tqdm
         batches = [images[i:i+args.batch_size] for i in range(0, len(images), args.batch_size)]
@@ -410,6 +434,11 @@ def main():
                 # print(result)  # 已禁用 print 输出
                 result.image_data = batch[i]  # 使用image_data字段存储图片路径
                 results.append(result)
+                # 收集类别名称
+                if hasattr(result, 'predictions') and result.predictions:
+                    for pred in result.predictions:
+                        if hasattr(pred, 'name') and pred.name:
+                            all_detected_classes.add(pred.name)
     
     # Determine output mode: file or directory
     output_path = Path(args.output)
@@ -427,6 +456,30 @@ def main():
         # Save COCO JSON
         coco_json_path = output_dir / "_annotations.coco.json"
         to_coco(results, str(coco_json_path))
+        
+        # 保存类别列表（优先使用模型中的完整类别列表）
+        try:
+            import json
+            # 优先使用从模型中获取的完整类别列表
+            if all_class_names_from_model:
+                class_names = all_class_names_from_model
+            elif all_detected_classes:
+                # 如果模型中没有，使用从预测结果中收集到的类别
+                class_names = sorted(list(all_detected_classes))
+            else:
+                # 最后回退方案：从 COCO JSON 中提取
+                with open(coco_json_path, 'r', encoding='utf-8') as f:
+                    coco_data = json.load(f)
+                categories = coco_data.get('categories', [])
+                class_names = [cat['name'] for cat in categories] if categories else []
+            
+            if class_names:
+                class_names_file = output_dir / "_class_names.json"
+                with open(class_names_file, 'w', encoding='utf-8') as f:
+                    json.dump({"class_names": class_names}, f, ensure_ascii=False, indent=2)
+                logger.info(f"保存类别列表: {len(class_names)} 个类别 -> {class_names_file}")
+        except Exception as e:
+            logger.warning(f"无法保存类别列表: {e}")
         
         # Save visualization images
         logger.info(f"Saving visualization images to {preds_dir}")

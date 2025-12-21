@@ -436,6 +436,17 @@ def main():
         coco_json_path = output_dir / "_annotations.coco.json"
         to_coco(results, str(coco_json_path), class_names=class_names)
         
+        # 保存类别列表到 JSON 文件（用于前端显示所有类别）
+        if class_names is not None:
+            import json
+            # 过滤掉空字符串，只保留有效类别名称
+            valid_class_names = [name for name in class_names if name and name.strip()]
+            if valid_class_names:
+                class_names_file = output_dir / "_class_names.json"
+                with open(class_names_file, 'w', encoding='utf-8') as f:
+                    json.dump({"class_names": valid_class_names}, f, ensure_ascii=False, indent=2)
+                logger.info(f"保存类别列表: {len(valid_class_names)} 个类别 -> {class_names_file}")
+        
         logger.info(f"Saving visualization images to {preds_dir}")
         from tqdm import tqdm
         for result, img_path in tqdm(results, desc="Visualizing"):

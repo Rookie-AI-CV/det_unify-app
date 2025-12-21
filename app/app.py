@@ -917,12 +917,27 @@ def predict():
                 'style_desc': style_map.get(model_styles.get(i, 'solid'), '实线')
             })
         
+        # 尝试读取类别列表（从第一个模型的输出目录）
+        all_class_names = None
+        if model_infos:
+            first_model_dir = result_dir / 'model_0'
+            class_names_file = first_model_dir / '_class_names.json'
+            if class_names_file.exists():
+                try:
+                    with open(class_names_file, 'r', encoding='utf-8') as f:
+                        class_names_data = json.load(f)
+                        all_class_names = class_names_data.get('class_names', [])
+                        logger.info(f"加载类别列表: {len(all_class_names)} 个类别")
+                except Exception as e:
+                    logger.warning(f"无法读取类别列表文件: {e}")
+        
         # Save results to JSON file for later retrieval
         results_data = {
             'result_id': result_id,
             'predictions': predictions,
             'model_infos': display_model_infos,
-            'label_colors': {k: list(v) for k, v in label_colors.items()}  # Convert tuple to list for JSON
+            'label_colors': {k: list(v) for k, v in label_colors.items()},  # Convert tuple to list for JSON
+            'all_class_names': all_class_names if all_class_names else []  # 所有类别名称列表
         }
         results_file = result_dir / 'results.json'
         with open(results_file, 'w', encoding='utf-8') as f:
