@@ -26,6 +26,11 @@ warnings.filterwarnings('ignore', category=FutureWarning, message='.*torch.load.
 logger.remove()  # 移除默认处理器
 logger.add(sys.stderr, level="INFO", format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>")
 
+try:
+    from .hq_model_registry import HQ_MODEL_KEYS, instantiate_hq_model
+except ImportError:
+    from hq_model_registry import HQ_MODEL_KEYS, instantiate_hq_model
+
 
 def get_images(image_path=None, image_dir=None, image_list=None):
     """Get image file list"""
@@ -210,25 +215,8 @@ def draw_detections(image, result, max_size=1536, class_names=None):
 
 def load_hq_model(checkpoint_path, model_type, device='cuda:0'):
     logger.info(f"加载 {model_type.upper()} 模型: {checkpoint_path}")
-    
-    model_map = {
-        'dino': ('hq_det.models.dino.hq_dino', 'HQDINO'),
-        'rtdetr': ('hq_det.models.rtdetr.hq_rtdetr', 'HQRTDETR'),
-        'rtmdet': ('hq_det.models.rtmdet', 'HQRTMDET'),
-        'yolo': ('hq_det.models.yolo', 'HQYOLO'),
-        'lwdetr': ('hq_det.models.lwdetr.hq_lwdetr', 'HQLWDETR'),
-        'rfdetr': ('hq_det.models.rfdetr.hq_rfdetr', 'HQRFDETR'),
-        'codetr': ('hq_det.models.codetr.hq_codetr', 'HQCoDetr'),
-    }
-    
-    if model_type not in model_map:
-        raise ValueError(f"不支持的模型类型: {model_type}")
-    
-    module_path, class_name = model_map[model_type]
-    module = __import__(module_path, fromlist=[class_name])
-    model_class = getattr(module, class_name)
-    
-    model = model_class(model=checkpoint_path)
+
+    model = instantiate_hq_model(checkpoint_path, model_type)
     model.eval()
     
     # 确保模型移动到指定设备
@@ -349,7 +337,7 @@ def main():
     parser.add_argument('--output', required=True, help='Output COCO JSON file or directory')
     parser.add_argument('--max-size', type=int, default=1536, help='Max image size for prediction')
     parser.add_argument('--model-type', required=True,
-                       choices=['dino', 'rtdetr', 'rtmdet', 'yolo', 'lwdetr', 'rfdetr', 'codetr'],
+                       choices=HQ_MODEL_KEYS,
                        help='Model type (required)')
     parser.add_argument('--device', default='cuda:0', help='Device to use (default: cuda:0)')
     args = parser.parse_args()

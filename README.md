@@ -1,266 +1,194 @@
 # DetUnify Studio
 
-**多模型检测统一工作平台** - 一个统一的 Web 应用程序，用于多种检测模型的预测、可视化和结果管理。
+本地多模型检测预测与结果整理工具。Web 端上传权重与图片即可跑批；支持多模型同图对比、误检/漏检/低置信度标注，以及导出 ZIP 与 HTML 报告。
 
-## 📋 项目简介
+详细操作步骤（含界面截图）见飞书文档：[预测工具用户使用手册](https://zcnce50wan15.feishu.cn/wiki/L1nFwAeQXiTdsmkfC5bcoAlDnJc)。
 
-DetUnify Studio 是一个基于 Flask 的 Web 应用平台，提供统一的接口来运行、管理和评估多种目标检测模型。支持自动模型类型检测、批量预测、结果可视化、标注管理和导出功能。
+## 能做什么
 
-## ✨ 主要功能
+- 自动识别 **DINO（ml_backend）** 与 **HQ-Det** 系列权重，无需手写模型类型（也可命令行手动指定）。
+- 一次任务可挂多个 `.pth` / `.pt`，结果按模型分目录，查看器里可叠加对比。
+- 对预测结果打标：误检、漏检、低置信度，并写备注。
+- 导出：标注图、原图（可选）、COCO JSON、分类用 JSON、`split_images.pyw`、HTML 报告。
 
-### 🎯 模型预测
-- **多模型支持**：支持同时加载多个模型进行批量预测
-- **自动模型识别**：自动检测模型类型，无需手动配置
-- **批量处理**：支持单张图片、图片目录或图片列表文件
-- **实时进度显示**：预测过程中显示实时进度和状态
+## 支持的模型
 
-### 🔍 结果查看与管理
-- **可视化查看器**：交互式图片查看器，支持缩放、拖拽、全屏
-- **检测框标注**：显示检测框、类别、置信度等信息
-- **多状态标注**：支持误检、漏检、低置信度等多种状态标注
-- **类别标注**：为误检、漏检等标注具体类别信息
-- **备注功能**：为每张图片添加备注信息
-- **快捷键操作**：支持键盘快捷键快速操作
+| 框架 | CLI 类型 | 说明 |
+|------|----------|------|
+| ml_backend | `dino` | 公司内部 DINO 检测流程 |
+| hq_det | `hq_det` + `--hq-model-type` | 见下表 |
 
-### 📊 结果导出
-- **完整导出**：导出标注图片、原图、模型文件
-- **分类整理**：自动生成分类 JSON 和 Python 脚本，方便后续整理
-- **HTML 报告**：生成详细的 HTML 格式预测报告
-- **进度显示**：导出过程中显示详细进度信息
+HQ-Det 子类型（`--hq-model-type`）：`dino`、`dino2`、`rtdetr`、`rtmdet`、`yolo`、`lwdetr`、`rfdetr`、`codetr`。
 
-### 🎨 用户体验
-- **现代化 UI**：简洁美观的用户界面
-- **响应式设计**：适配不同屏幕尺寸
-- **实时反馈**：操作即时反馈，状态清晰可见
+新增 HQ-Det 子类型时，只需在 `src/predict/hq_model_registry.py` 的 `HQ_MODELS` 中增加一行，无需改 `predict.py` / `predict_hq_det.py`。
 
-## 🚀 支持的模型类型
+## 安装
 
-### DINO 模型
-- 基于 `ml_backend` 的 DINO 检测模型
-- 支持批量预测和单张预测
+### 1. 获取代码
 
-### HQ-Det 模型系列
-支持以下 HQ-Det 子类型：
-- **DINO** (`dino`)
-- **RT-DETR** (`rtdetr`)
-- **RTMDet** (`rtmdet`)
-- **YOLO** (`yolo`)
-- **LW-DETR** (`lwdetr`)
-- **RF-DETR** (`rfdetr`)
-- **Co-DETR** (`codetr`)
+作为 [online_data_tool](https://github.com/algo-boost/online_data_tool) 子模块时：
 
-## 📦 安装
-
-### 环境要求
-- Python 3.8+
-- CUDA（推荐，用于 GPU 加速）
-- PyTorch
-- Flask
-
-### 安装步骤
-
-1. **克隆项目**
 ```bash
-git clone <repository-url>
-cd det_unify-app
+git submodule update --init --recursive tools/DetUnify-Studio
+cd tools/DetUnify-Studio
 ```
 
-2. **安装依赖**
-```bash
-# 安装 Python 依赖
-pip install flask werkzeug loguru opencv-python numpy pathlib
+单独使用本仓库：
 
-# 安装模型相关依赖（根据使用的模型类型）
-# DINO 模型需要 ml_backend
-# HQ-Det 模型需要相应的 hq_det 包
+```bash
+git clone https://github.com/algo-boost/DetUnify-Studio.git
+cd DetUnify-Studio
 ```
 
-3. **配置环境**
-```bash
-# 确保模型文件和相关依赖已正确安装
-# 检查 CUDA 是否可用（如果使用 GPU）
-python -c "import torch; print(torch.cuda.is_available())"
-```
-
-## 🎮 使用方法
-
-### 启动应用
+### 2. Web 界面（必需）
 
 ```bash
 cd app
+pip install flask werkzeug loguru opencv-python numpy pillow tqdm
 python app.py
 ```
 
-应用将在 `http://localhost:6006` 启动（默认端口）。
+浏览器打开 **http://localhost:6006**（端口在 `app/app.py` 中配置）。
 
-### Web 界面使用
+也可执行 `app/run.sh`（等价于在 `app` 目录下运行 `python app.py`）。
 
-#### 1. 上传模型
-- 拖拽模型文件（`.pt`, `.pth`, `.ckpt`）或 ZIP 压缩包到上传区域
-- 或通过本地路径导入模型文件
-- 支持同时上传多个模型
+### 3. 模型推理依赖（按实际权重安装）
 
-#### 2. 上传数据
-- 拖拽图片文件或 ZIP 压缩包
-- 或通过本地路径导入图片目录
+| 权重类型 | 需要安装的包 |
+|----------|----------------|
+| DINO | `ml_backend` 及对应训练环境 |
+| HQ-Det 各子类型 | `hq_det`；另按子模型可能需要 `mmdet`、`ultralytics`、`supervision` 等 |
 
-#### 3. 开始预测
-- 设置预测参数（阈值、最大尺寸等）
-- 点击"开始预测"按钮
-- 等待预测完成
-
-#### 4. 查看结果
-- 点击结果卡片进入查看器
-- 使用快捷键或按钮进行导航
-- 标注误检、漏检、低置信度等状态
-- 添加备注信息
-
-#### 5. 导出结果
-- 在结果查看器中点击"导出"按钮
-- 选择导出选项（原图、标注图、模型文件等）
-- 等待导出完成并下载 ZIP 文件
-
-### 命令行使用
-
-项目也提供了命令行预测接口：
+`hq_det` 若不在默认 Python 路径下，可设置：
 
 ```bash
-# 自动检测模型类型并预测
-python src/predict/predict.py --checkpoint model.pth --image test.jpg --output results/
-
-# 指定图片目录
-python src/predict/predict.py --checkpoint model.pth --image-dir images/ --output results/
-
-# 手动指定模型类型
-python src/predict/predict.py --checkpoint model.pth --model-type hq_det --hq-model-type rtdetr --image-dir images/ --output results/
-
-# 指定参数
-python src/predict/predict.py --checkpoint model.pth --image-dir images/ --threshold 0.3 --max-size 2048 --output results/
+export PYTHONPATH="/path/to/hq_det:${PYTHONPATH}"
 ```
 
-## ⌨️ 快捷键
+检查 GPU（可选）：
 
-在结果查看器中支持以下快捷键：
-
-- `←` / `A` - 上一张图片
-- `→` / `D` - 下一张图片
-- `F` - 标记为误检
-- `M` - 标记为漏检
-- `L` - 标记为低置信度
-- `T` - 切换原图/标注图
-- `F11` / `F` - 全屏模式
-- `ESC` - 退出全屏
-
-## 📁 项目结构
-
-```
-det_unify-app/
-├── app/                    # Flask 应用主目录
-│   ├── app.py             # 主应用文件
-│   ├── readme_generator.py # HTML 报告生成器
-│   ├── templates/         # HTML 模板
-│   │   ├── index.html     # 主页面
-│   │   └── viewer.html    # 结果查看器
-│   └── static/            # 静态文件
-│       ├── css/           # 样式文件
-│       ├── js/            # JavaScript 文件
-│       ├── uploads/       # 上传文件目录
-│       └── results/       # 预测结果目录
-├── src/                    # 源代码目录
-│   └── predict/           # 预测相关代码
-│       ├── predict.py     # 统一预测入口
-│       ├── predict_hq_det.py  # HQ-Det 模型预测
-│       └── predict_dino.py    # DINO 模型预测
-└── README.md              # 本文件
+```bash
+python -c "import torch; print(torch.cuda.is_available())"
 ```
 
-## 🔧 配置说明
+未安装某框架时，Web 仍可启动，但加载该类型权重会失败；日志里会有具体 import 错误。
 
-### 应用配置
+## 使用
 
-在 `app/app.py` 中可以配置：
+### Web
 
-- `MAX_CONTENT_LENGTH`：最大上传文件大小（默认 2GB）
-- `UPLOAD_FOLDER`：上传文件存储目录
-- `RESULTS_FOLDER`：结果文件存储目录
-- `EXPORT_CACHE_FOLDER`：导出缓存目录
+1. 导入模型：拖拽或填写本地路径（支持 `.pt` / `.pth` / `.ckpt` 及 zip）。
+2. 导入图片：目录或 zip。
+3. 设置阈值、`max_size`（HQ-Det）等，开始预测。
+4. 在结果列表进入查看器，标注并导出。
 
-### 预测参数
+界面说明见上文飞书手册。
 
-- `--threshold`：置信度阈值（默认 0.5）
-- `--max-size`：最大图片尺寸（HQ-Det 模型，默认 1536）
-- `--batch-size`：批次大小（DINO 模型，默认 6）
-- `--device`：计算设备（默认 cuda:0）
+### 命令行
 
-## 🎯 功能特性详解
+统一入口 `src/predict/predict.py`，输出为 COCO JSON（目录模式会额外生成 `preds/` 可视化图）。
 
-### 类别管理
-- 从模型文件中自动提取所有类别名称
-- 漏检标注时显示完整类别列表，支持选择所有可能的类别
-- 支持多类别选择
+```bash
+# 自动识别模型类型
+python src/predict/predict.py \
+  --checkpoint /path/to/model.pth \
+  --image-dir /path/to/images \
+  --output /path/to/out
 
-### 状态标注
-- **误检（False Positive）**：标记错误检测的框
-- **漏检（Missed）**：标记应该检测到但未检测到的类别
-- **低置信度（Low Confidence）**：标记置信度过低的检测框
+# 单张图
+python src/predict/predict.py \
+  --checkpoint model.pth \
+  --image test.jpg \
+  --output results/
 
-### 导出功能
-- 导出标注图片和原图
-- 生成分类 JSON 文件（包含误检、漏检、低置信度的图片和类别信息）
-- 提供 Python 脚本（`split_images.pyw`）用于自动分类整理
-- 生成详细的 HTML 报告
+# 指定 HQ-Det 子类型
+python src/predict/predict.py \
+  --checkpoint model.pth \
+  --model-type hq_det \
+  --hq-model-type rtdetr \
+  --image-dir images/ \
+  --output results/
 
-## 🐛 故障排除
+# 调参
+python src/predict/predict.py \
+  --checkpoint model.pth \
+  --image-dir images/ \
+  --threshold 0.3 \
+  --max-size 2048 \
+  --device cuda:0 \
+  --output results/
+```
 
-### 常见问题
+直接调用子脚本（一般不必）：
 
-1. **模型加载失败**
-   - 检查模型文件路径是否正确
-   - 确认模型类型是否支持
-   - 查看日志中的详细错误信息
+```bash
+python src/predict/predict_hq_det.py --checkpoint model.pth --model-type rtdetr --image-dir images/ --output results/
+python src/predict/predict_dino.py --checkpoint model.pth --image-dir images/ --output results/
+```
 
-2. **GPU 不可用**
-   - 检查 CUDA 是否正确安装
-   - 确认 PyTorch 是否支持 CUDA
-   - 可以设置 `--device cpu` 使用 CPU
+## 查看器快捷键
 
-3. **预测失败**
-   - 检查图片格式是否支持
-   - 确认模型和图片路径正确
-   - 查看详细错误日志
+| 按键 | 作用 |
+|------|------|
+| `←` / `A` | 上一张 |
+| `→` / `D` | 下一张 |
+| `F` | 误检（再按取消） |
+| `M` | 漏检 |
+| `L` | 低置信度 |
+| `+` / `-` | 缩放 |
+| `0` | 重置缩放与位置 |
+| `Ctrl` / `Cmd` + 滚轮 | 缩放 |
 
-4. **导出失败**
-   - 检查磁盘空间是否充足
-   - 确认文件权限正确
-   - 查看导出进度日志
+## 目录结构
 
-## 📝 开发说明
+```
+DetUnify-Studio/
+├── app/
+│   ├── app.py                 # Flask 主程序
+│   ├── readme_generator.py    # 导出 HTML 报告
+│   ├── run.sh
+│   ├── templates/             # index / viewer
+│   └── static/
+│       ├── scripts/split_images.pyw   # 导出包内按状态分目录
+│       ├── uploads/
+│       └── results/
+└── src/predict/
+    ├── predict.py             # 统一入口（类型检测 + 调子脚本）
+    ├── predict_hq_det.py
+    ├── predict_dino.py
+    ├── hq_model_registry.py   # HQ-Det 模型注册表
+    └── test_hq_model_registry.py
+```
 
-### 添加新模型类型
+## 导出包说明
 
-1. 在 `src/predict/` 目录下创建新的预测脚本
-2. 在 `src/predict/predict.py` 中添加模型检测逻辑
-3. 实现模型的加载和预测接口
-4. 确保输出格式符合 COCO JSON 标准
+导出 ZIP 中常见内容：
 
-### 扩展功能
+- 各模型的 `_annotations.coco.json`
+- `preds/` 标注可视化图
+- `原图/`（勾选导出原图时）
+- `README.md` / HTML 报告
+- `split_images.pyw`：在导出目录双击运行，按误检、漏检、低置信度分子目录整理图片
 
-项目采用模块化设计，便于扩展：
-- `app/app.py`：主应用逻辑
-- `app/readme_generator.py`：报告生成
-- `src/predict/`：预测模块
-- `app/templates/`：前端界面
+## 常见问题
 
-## 🤝 贡献
+**模型加载失败**  
+确认权重路径正确；HQ-Det 是否已安装且 `PYTHONPATH` 包含 `hq_det`；子类型不对时可加 `--hq-model-type` 手动指定。
 
-欢迎提交 Issue 和 Pull Request！
+**只能用 CPU**  
+命令行加 `--device cpu`；或检查 CUDA 与 PyTorch 是否匹配。
 
-## 📧 联系方式
+**预测无框 / COCO 为空**  
+调高或调低 `--threshold`；HQ-Det 可尝试调整 `--max-size`。
 
-**作者**: Rookie  
-**邮箱**: RookieEmail@163.com
+**导出很慢或失败**  
+检查磁盘空间；`app.py` 中 `MAX_CONTENT_LENGTH` 默认 2GB，超大包需分批。
 
+## 开发
 
----
+- 注册新 HQ-Det 类型：编辑 `src/predict/hq_model_registry.py`。
+- 跑注册表相关单元测试：`python -m unittest src.predict.test_hq_model_registry -v`（在项目根目录执行）。
 
-**DetUnify Studio** - 让模型预测和管理更简单 🚀
+## 联系
+
+Rookie — RookieEmail@163.com

@@ -20,6 +20,11 @@ warnings.filterwarnings('ignore', category=FutureWarning, message='.*torch.load.
 logger.remove()  # 移除默认处理器
 logger.add(sys.stderr, level="INFO", format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>")
 
+try:
+    from .hq_model_registry import HQ_MODEL_KEYS, try_load_hq_model
+except ImportError:
+    from hq_model_registry import HQ_MODEL_KEYS, try_load_hq_model
+
 
 def try_load_dino(checkpoint_path):
     """尝试加载 DINO (ml_backend) 模型，返回 (成功标志, 错误信息)"""
@@ -40,32 +45,6 @@ def try_load_dino(checkpoint_path):
         return False, str(e)
 
 
-def try_load_hq_model(checkpoint_path, model_type):
-    """尝试加载 HQ-Det 模型，返回 (成功标志, 错误信息)"""
-    try:
-        model_map = {
-            'dino': ('hq_det.models.dino.hq_dino', 'HQDINO'),
-            'rtdetr': ('hq_det.models.rtdetr.hq_rtdetr', 'HQRTDETR'),
-            'rtmdet': ('hq_det.models.rtmdet', 'HQRTMDET'),
-            'yolo': ('hq_det.models.yolo', 'HQYOLO'),
-            'lwdetr': ('hq_det.models.lwdetr.hq_lwdetr', 'HQLWDETR'),
-            'rfdetr': ('hq_det.models.rfdetr.hq_rfdetr', 'HQRFDETR'),
-            'codetr': ('hq_det.models.codetr.hq_codetr', 'HQCoDetr'),
-        }
-        
-        if model_type not in model_map:
-            return False, f"未知模型类型: {model_type}"
-        
-        module_path, class_name = model_map[model_type]
-        module = __import__(module_path, fromlist=[class_name])
-        model_class = getattr(module, class_name)
-        model = model_class(model=checkpoint_path)
-        del model
-        return True, None
-    except Exception as e:
-        return False, str(e)
-
-
 def detect_hq_model_type(checkpoint_path):
     """检测 HQ-Det 模型的子类型，返回子类型名称"""
     if not os.path.exists(checkpoint_path):
@@ -79,10 +58,7 @@ def detect_hq_model_type(checkpoint_path):
     except ImportError:
         use_tqdm = False
     
-    # HQ-Det 模型子类型列表
-    hq_model_types = ['dino', 'rtdetr', 'rtmdet', 'yolo', 'lwdetr', 'rfdetr', 'codetr']
-    
-    iterator = tqdm(hq_model_types, desc="检测 HQ-Det 模型类型", leave=False) if use_tqdm else hq_model_types
+    iterator = tqdm(HQ_MODEL_KEYS, desc="检测 HQ-Det 模型类型", leave=False) if use_tqdm else HQ_MODEL_KEYS
     for sub_type in iterator:
         success, error = try_load_hq_model(checkpoint_path, sub_type)
         if success:
@@ -108,17 +84,8 @@ def detect_model_type(checkpoint_path):
     except ImportError:
         use_tqdm = False
     
-    # 尝试列表：先尝试 DINO (ml_backend)，再尝试所有 HQ-Det 模型
-    attempts = [
-        ('dino', 'ml_backend'),
-        ('hq_det', 'dino'),
-        ('hq_det', 'rtdetr'),
-        ('hq_det', 'rtmdet'),
-        ('hq_det', 'yolo'),
-        ('hq_det', 'lwdetr'),
-        ('hq_det', 'rfdetr'),
-        ('hq_det', 'codetr'),
-    ]
+    # 先尝试 DINO (ml_backend)，再按注册表顺序尝试 HQ-Det 子类型
+    attempts = [('dino', 'ml_backend')] + [('hq_det', key) for key in HQ_MODEL_KEYS]
     
     iterator = tqdm(attempts, desc="检测模型类型", leave=False) if use_tqdm else attempts
     for model_type, sub_type in iterator:
@@ -171,8 +138,8 @@ def main():
     parser.add_argument('--output', required=True, help='输出路径 (COCO JSON文件或目录)')
     parser.add_argument('--model-type', choices=['dino', 'hq_det'], default=None,
                        help='手动指定模型类型（dino 或 hq_det），未指定时自动检测所有类型')
-    parser.add_argument('--hq-model-type', 
-                       choices=['dino', 'rtdetr', 'rtmdet', 'yolo', 'lwdetr', 'rfdetr', 'codetr'],
+    parser.add_argument('--hq-model-type',
+                       choices=HQ_MODEL_KEYS,
                        default=None, help='手动指定 HQ-Det 模型子类型，未指定时自动检测')
     
     args = parser.parse_args()
