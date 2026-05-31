@@ -21,20 +21,34 @@ from collections import defaultdict
 import threading
 import time
 
+APP_DIR = Path(__file__).parent
+ROOT_DIR = APP_DIR.parent
+
 # Import prediction utilities
 import sys
-ROOT_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 from src.predict.predict import detect_model_type
 
 # Import README generator from same directory
 from readme_generator import generate_readme
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    template_folder=str(APP_DIR / 'templates'),
+    static_folder=str(APP_DIR / 'static'),
+)
+MOUNT_PREFIX = os.environ.get('DETUNIFY_MOUNT_PREFIX', '').rstrip('/') or ''
+
+
+@app.context_processor
+def _inject_mount_prefix():
+    return {'mount_prefix': MOUNT_PREFIX}
+
+
 app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024  # 2GB max file size
-app.config['UPLOAD_FOLDER'] = Path(__file__).parent / 'static' / 'uploads'
-app.config['RESULTS_FOLDER'] = Path(__file__).parent / 'static' / 'results'
-app.config['EXPORT_CACHE_FOLDER'] = Path(__file__).parent / 'static' / 'export_cache'
+app.config['UPLOAD_FOLDER'] = APP_DIR / 'static' / 'uploads'
+app.config['RESULTS_FOLDER'] = APP_DIR / 'static' / 'results'
+app.config['EXPORT_CACHE_FOLDER'] = APP_DIR / 'static' / 'export_cache'
 
 # 确保导出缓存目录存在
 app.config['EXPORT_CACHE_FOLDER'].mkdir(parents=True, exist_ok=True)
@@ -953,7 +967,7 @@ def predict():
 
 @app.route('/static/<path:path>')
 def send_static(path):
-    return send_from_directory('static', path)
+    return send_from_directory(str(APP_DIR / 'static'), path)
 
 
 @app.route('/viewer/<result_id>')

@@ -5,16 +5,45 @@ let currentResults = null;
 let currentImageIndex = 0;
 let imageList = [];
 
-// Tab switching
-document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-        
-        btn.classList.add('active');
-        document.getElementById(btn.dataset.tab + '-tab').classList.add('active');
-    });
-});
+function setProgressVisible(container, visible) {
+    if (!container) return;
+    if (visible) container.removeAttribute('hidden');
+    else container.setAttribute('hidden', '');
+}
+
+function setPredictBtnLabel(text) {
+    const btn = document.getElementById('predict-btn');
+    const label = btn?.querySelector('.btn-label');
+    if (label) label.textContent = text;
+    else if (btn) btn.textContent = text;
+}
+
+function updateWorkflowStatus() {
+    const modelCount = uploadedModels.length;
+    const imageCount = uploadedImages.length;
+
+    const statusModels = document.getElementById('status-models');
+    const statusImages = document.getElementById('status-images');
+    const checkModels = document.getElementById('check-models');
+    const checkImages = document.getElementById('check-images');
+
+    if (statusModels) {
+        statusModels.innerHTML = `<span class="du-pill-dot"></span>模型 ${modelCount}`;
+        statusModels.classList.toggle('is-ready', modelCount > 0);
+    }
+    if (statusImages) {
+        statusImages.innerHTML = `<span class="du-pill-dot"></span>图片 ${imageCount}`;
+        statusImages.classList.toggle('is-ready', imageCount > 0);
+    }
+    if (checkModels) {
+        checkModels.classList.toggle('is-done', modelCount > 0);
+        checkModels.textContent = modelCount > 0 ? `已添加 ${modelCount} 个模型` : '模型已就绪';
+    }
+    if (checkImages) {
+        checkImages.classList.toggle('is-done', imageCount > 0);
+        checkImages.textContent = imageCount > 0 ? `已添加 ${imageCount} 张图片` : '图片已就绪';
+    }
+}
 
 // Model upload
 const modelUploadArea = document.getElementById('model-upload-area');
@@ -46,7 +75,7 @@ function handleModelUpload(files) {
     
     uploadArea.style.opacity = '0.6';
     uploadArea.style.pointerEvents = 'none';
-    progressContainer.style.display = 'flex';
+    setProgressVisible(progressContainer, true);
     progressFill.style.width = '0%';
     progressText.textContent = '0%';
     
@@ -63,7 +92,7 @@ function handleModelUpload(files) {
     xhr.addEventListener('load', () => {
         uploadArea.style.opacity = '1';
         uploadArea.style.pointerEvents = 'auto';
-        progressContainer.style.display = 'none';
+        setProgressVisible(progressContainer, false);
         
         if (xhr.status === 200) {
             try {
@@ -102,18 +131,18 @@ function handleModelUpload(files) {
     xhr.addEventListener('error', () => {
         uploadArea.style.opacity = '1';
         uploadArea.style.pointerEvents = 'auto';
-        progressContainer.style.display = 'none';
+        setProgressVisible(progressContainer, false);
         alert('上传失败: 网络错误');
     });
     
     xhr.addEventListener('abort', () => {
         uploadArea.style.opacity = '1';
         uploadArea.style.pointerEvents = 'auto';
-        progressContainer.style.display = 'none';
+        setProgressVisible(progressContainer, false);
         alert('上传已取消');
     });
     
-    xhr.open('POST', '/api/upload/models');
+    xhr.open('POST', duPath('/api/upload/models'));
     xhr.send(formData);
 }
 
@@ -143,7 +172,7 @@ function handleModelPathImport() {
     btn.disabled = true;
     btn.textContent = '导入中...';
     
-    fetch('/api/upload/models/path', {
+    fetch(duPath('/api/upload/models/path'), {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -156,7 +185,7 @@ function handleModelPathImport() {
     .then(response => response.json())
     .then(data => {
         btn.disabled = false;
-        btn.textContent = '导入路径';
+        btn.textContent = '导入';
         pathInput.value = ''; // Clear input after successful import
         
         if (data.error) {
@@ -184,7 +213,7 @@ function handleModelPathImport() {
     .catch(error => {
         console.error('Error:', error);
         btn.disabled = false;
-        btn.textContent = '导入路径';
+        btn.textContent = '导入';
         alert('导入失败: ' + error.message);
     });
 }
@@ -210,7 +239,7 @@ function handleDataPathImport() {
     btn.disabled = true;
     btn.textContent = '导入中...';
     
-    fetch('/api/upload/data/path', {
+    fetch(duPath('/api/upload/data/path'), {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -223,7 +252,7 @@ function handleDataPathImport() {
     .then(response => response.json())
     .then(data => {
         btn.disabled = false;
-        btn.textContent = '导入目录';
+        btn.textContent = '导入';
         pathInput.value = ''; // Clear input after successful import
         
         if (data.error) {
@@ -250,7 +279,7 @@ function handleDataPathImport() {
     .catch(error => {
         console.error('Error:', error);
         btn.disabled = false;
-        btn.textContent = '导入目录';
+        btn.textContent = '导入';
         alert('导入失败: ' + error.message);
     });
 }
@@ -280,7 +309,7 @@ function handleDataUpload(files) {
     
     uploadArea.style.opacity = '0.6';
     uploadArea.style.pointerEvents = 'none';
-    progressContainer.style.display = 'flex';
+    setProgressVisible(progressContainer, true);
     progressFill.style.width = '0%';
     progressText.textContent = '0%';
     
@@ -297,7 +326,7 @@ function handleDataUpload(files) {
     xhr.addEventListener('load', () => {
         uploadArea.style.opacity = '1';
         uploadArea.style.pointerEvents = 'auto';
-        progressContainer.style.display = 'none';
+        setProgressVisible(progressContainer, false);
         
         if (xhr.status === 200) {
             try {
@@ -335,18 +364,18 @@ function handleDataUpload(files) {
     xhr.addEventListener('error', () => {
         uploadArea.style.opacity = '1';
         uploadArea.style.pointerEvents = 'auto';
-        progressContainer.style.display = 'none';
+        setProgressVisible(progressContainer, false);
         alert('上传失败: 网络错误');
     });
     
     xhr.addEventListener('abort', () => {
         uploadArea.style.opacity = '1';
         uploadArea.style.pointerEvents = 'auto';
-        progressContainer.style.display = 'none';
+        setProgressVisible(progressContainer, false);
         alert('上传已取消');
     });
     
-    xhr.open('POST', '/api/upload/data');
+    xhr.open('POST', duPath('/api/upload/data'));
     xhr.send(formData);
 }
 
@@ -362,7 +391,7 @@ function runPrediction() {
     
     const btn = document.getElementById('predict-btn');
     btn.disabled = true;
-    btn.textContent = '预测中...';
+    setPredictBtnLabel('预测中...');
     
     // Prepare model configs with individual thresholds and max sizes
     const modelConfigs = uploadedModels.map(model => ({
@@ -371,7 +400,7 @@ function runPrediction() {
         max_size: model.maxSize || 1536
     }));
     
-    fetch('/api/predict', {
+    fetch(duPath('/api/predict'), {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -403,7 +432,7 @@ function runPrediction() {
         if (data.error) {
             alert('预测失败: ' + data.error);
             btn.disabled = false;
-            btn.textContent = '开始预测';
+            setPredictBtnLabel('开始预测');
             return;
         }
         
@@ -412,11 +441,11 @@ function runPrediction() {
         displayResults(data);
         
         btn.disabled = false;
-        btn.textContent = '开始预测';
+        setPredictBtnLabel('开始预测');
         
         // Open first image in a new window/tab
         if (imageList.length > 0 && data.result_id) {
-            const viewerUrl = `/viewer/${data.result_id}`;
+            const viewerUrl = duPath(`/viewer/${data.result_id}`);
             window.open(viewerUrl, '_blank');
         }
     })
@@ -432,7 +461,7 @@ function runPrediction() {
         }
         alert(errorMessage);
         btn.disabled = false;
-        btn.textContent = '开始预测';
+        setPredictBtnLabel('开始预测');
     });
 }
 
@@ -440,7 +469,7 @@ function displayResults(data) {
     const resultsSection = document.getElementById('results-section');
     const resultsGrid = document.getElementById('results-grid');
     
-    resultsSection.style.display = 'block';
+    resultsSection.removeAttribute('hidden');
     resultsGrid.innerHTML = '';
     
     // Create legend
@@ -478,7 +507,7 @@ function openImageViewer(imgName) {
     if (!currentResults || !currentResults.result_id) return;
     
     // Navigate to viewer page
-    window.location.href = `/viewer/${currentResults.result_id}`;
+    window.location.href = duPath(`/viewer/${currentResults.result_id}`);
 }
 
 function clearResults() {
@@ -489,7 +518,7 @@ function clearResults() {
         const resultsGrid = document.getElementById('results-grid');
         
         resultsGrid.innerHTML = '';
-        resultsSection.style.display = 'none';
+        resultsSection.setAttribute('hidden', '');
         currentResults = null;
         imageList = [];
     }
@@ -590,6 +619,7 @@ function updateModelList() {
         `;
         list.appendChild(item);
     });
+    updateWorkflowStatus();
 }
 
 function updateModelThreshold(idx, value) {
@@ -633,14 +663,17 @@ function updateDataList() {
         `;
         list.appendChild(item);
     }
+    updateWorkflowStatus();
 }
 
 function checkPredictButton() {
     const btn = document.getElementById('predict-btn');
     btn.disabled = uploadedModels.length === 0 || uploadedImages.length === 0;
+    updateWorkflowStatus();
 }
 
 function generateSessionId() {
     return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 }
 
+updateWorkflowStatus();

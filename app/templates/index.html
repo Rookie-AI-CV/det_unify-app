@@ -1,90 +1,135 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-mount-prefix="{{ mount_prefix or '' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DetUnify Studio</title>
+    <title>在线预测 · DetUnify</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="{{ url_for('static', filename='js/mount.js') }}"></script>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>DetUnify Studio</h1>
-            <div class="tabs">
-                <button class="tab-btn active" data-tab="predict">模型预测</button>
-                <button class="tab-btn" data-tab="evaluate">模型评估</button>
+    <div class="du-app">
+        <header class="du-header">
+            <div class="du-header-brand">
+                <div class="du-logo" aria-hidden="true">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="du-title">在线预测</h1>
+                    <p class="du-subtitle">上传模型与图片，多模型并行推理并对比结果</p>
+                </div>
+            </div>
+            <div class="du-status-bar" id="workflow-status">
+                <span class="du-pill" id="status-models"><span class="du-pill-dot"></span>模型 0</span>
+                <span class="du-pill" id="status-images"><span class="du-pill-dot"></span>图片 0</span>
             </div>
         </header>
 
-        <main id="predict-tab" class="tab-content active">
-            <div class="section">
-                <h2>1. 上传模型文件</h2>
-                <div class="upload-area" id="model-upload-area">
-                    <p>拖拽模型文件到此处或点击上传</p>
-                    <p class="hint">支持 .pt, .pth, .ckpt 文件或包含模型文件的 .zip 压缩包（可上传多个）</p>
-                    <input type="file" id="model-input" multiple accept=".pt,.pth,.ckpt,.zip">
-                </div>
-                <div style="margin: 15px 0; padding: 15px; background: #f5f5f5; border-radius: 8px;">
-                    <p style="margin: 0 0 10px 0; font-weight: 600; color: #666;">或通过本地路径导入：</p>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <input type="text" id="model-path-input" placeholder="输入模型路径，多个路径用分号(;)分割" 
-                               style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
-                        <button id="model-path-btn" class="btn-secondary" style="padding: 8px 16px;">导入路径</button>
+        <main class="du-main">
+            <div class="du-workflow">
+                <!-- Step 1: Models -->
+                <section class="du-card du-step" data-step="1">
+                    <div class="du-step-head">
+                        <span class="du-step-num">1</span>
+                        <div>
+                            <h2 class="du-step-title">上传模型</h2>
+                            <p class="du-step-desc">支持 .pt / .pth / .ckpt 或含模型的 .zip，可多个</p>
+                        </div>
                     </div>
-                </div>
-                <div id="model-progress" class="progress-container" style="display: none;">
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="model-progress-fill"></div>
+
+                    <div class="upload-area" id="model-upload-area">
+                        <div class="upload-icon" aria-hidden="true">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                            </svg>
+                        </div>
+                        <p class="upload-title">拖拽或点击上传模型</p>
+                        <p class="hint">.pt · .pth · .ckpt · .zip</p>
+                        <input type="file" id="model-input" multiple accept=".pt,.pth,.ckpt,.zip">
                     </div>
-                    <span class="progress-text" id="model-progress-text">0%</span>
-                </div>
-                <div id="model-list" class="file-list"></div>
+
+                    <details class="du-path-block">
+                        <summary>从本地路径导入</summary>
+                        <div class="du-path-row">
+                            <input type="text" id="model-path-input" class="du-input" placeholder="多个路径用分号 (;) 分隔">
+                            <button type="button" id="model-path-btn" class="btn-ghost">导入</button>
+                        </div>
+                    </details>
+
+                    <div id="model-progress" class="progress-container" hidden>
+                        <div class="progress-bar"><div class="progress-fill" id="model-progress-fill"></div></div>
+                        <span class="progress-text" id="model-progress-text">0%</span>
+                    </div>
+                    <div id="model-list" class="model-list"></div>
+                </section>
+
+                <!-- Step 2: Data -->
+                <section class="du-card du-step" data-step="2">
+                    <div class="du-step-head">
+                        <span class="du-step-num">2</span>
+                        <div>
+                            <h2 class="du-step-title">上传图片</h2>
+                            <p class="du-step-desc">单张或多张图片，或包含图片的压缩包</p>
+                        </div>
+                    </div>
+
+                    <div class="upload-area" id="data-upload-area">
+                        <div class="upload-icon" aria-hidden="true">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
+                            </svg>
+                        </div>
+                        <p class="upload-title">拖拽或点击上传图片</p>
+                        <p class="hint">.jpg · .jpeg · .png · .bmp · .zip</p>
+                        <input type="file" id="data-input" multiple accept=".jpg,.jpeg,.png,.bmp,.zip">
+                    </div>
+
+                    <details class="du-path-block">
+                        <summary>从本地目录导入</summary>
+                        <div class="du-path-row">
+                            <input type="text" id="data-path-input" class="du-input" placeholder="图片目录绝对路径">
+                            <button type="button" id="data-path-btn" class="btn-ghost">导入</button>
+                        </div>
+                    </details>
+
+                    <div id="data-progress" class="progress-container" hidden>
+                        <div class="progress-bar"><div class="progress-fill" id="data-progress-fill"></div></div>
+                        <span class="progress-text" id="data-progress-text">0%</span>
+                    </div>
+                    <div id="data-list" class="file-list"></div>
+                </section>
+
+                <!-- Step 3: Results -->
+                <section class="du-card du-step du-results" id="results-section" hidden>
+                    <div class="du-step-head">
+                        <span class="du-step-num du-step-num--done">✓</span>
+                        <div class="du-results-head">
+                            <h2 class="du-step-title">预测结果</h2>
+                            <button type="button" id="clear-results-btn" class="btn-ghost btn-sm">清空结果</button>
+                        </div>
+                    </div>
+                    <div id="results-grid" class="results-grid"></div>
+                </section>
             </div>
 
-            <div class="section">
-                <h2>2. 上传数据文件</h2>
-                <div class="upload-area" id="data-upload-area">
-                    <p>拖拽图片文件或压缩包到此处或点击上传</p>
-                    <p class="hint">支持 .jpg, .jpeg, .png, .bmp 文件或包含图片的 .zip 压缩包</p>
-                    <input type="file" id="data-input" multiple accept=".jpg,.jpeg,.png,.bmp,.zip">
+            <aside class="du-action-panel">
+                <div class="du-action-card">
+                    <h3 class="du-action-title">开始预测</h3>
+                    <p class="du-action-hint">需至少 1 个模型与 1 张图片。各模型可单独设置置信度阈值与最大输入尺寸。</p>
+                    <ul class="du-checklist">
+                        <li id="check-models" class="du-check-item">模型已就绪</li>
+                        <li id="check-images" class="du-check-item">图片已就绪</li>
+                    </ul>
+                    <button type="button" id="predict-btn" class="btn-primary btn-block" disabled>
+                        <span class="btn-label">开始预测</span>
+                    </button>
                 </div>
-                <div style="margin: 15px 0; padding: 15px; background: #f5f5f5; border-radius: 8px;">
-                    <p style="margin: 0 0 10px 0; font-weight: 600; color: #666;">或通过本地目录导入：</p>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <input type="text" id="data-path-input" placeholder="输入图片目录路径" 
-                               style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
-                        <button id="data-path-btn" class="btn-secondary" style="padding: 8px 16px;">导入目录</button>
-                    </div>
-                </div>
-                <div id="data-progress" class="progress-container" style="display: none;">
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="data-progress-fill"></div>
-                    </div>
-                    <span class="progress-text" id="data-progress-text">0%</span>
-                </div>
-                <div id="data-list" class="file-list"></div>
-            </div>
-
-            <div class="section">
-                <button id="predict-btn" class="btn-primary" disabled>开始预测</button>
-            </div>
-
-            <div class="section" id="results-section" style="display: none;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h2 style="margin: 0;">4. 预测结果</h2>
-                    <button id="clear-results-btn" class="btn-secondary" style="padding: 8px 16px;">清空结果</button>
-                </div>
-                <div id="results-grid" class="results-grid"></div>
-            </div>
-        </main>
-
-        <main id="evaluate-tab" class="tab-content">
-            <p>模型评估功能开发中...</p>
+            </aside>
         </main>
     </div>
-
 
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>
-
